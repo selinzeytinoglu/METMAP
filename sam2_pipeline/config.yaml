@@ -1,0 +1,29 @@
+# Video information
+participant_id: 510
+fps: 29.96
+start_frame: 3997
+end_frame: 9393
+
+# Base data directories
+# local_data_dir: path to your data folder on your machine / network drive
+# docker_data_dir: path inside the Docker container (matches your -v mount)
+local_data_dir: C:\Users\avery\Desktop\sample data
+docker_data_dir: /data
+
+# Relative paths — relative to the base data directories above
+frames_dir: 510_momspeech_childET_frames
+gaze_path: gaze_positions.csv
+prompt_coordinates: coordinates.json
+masks_dir: output/masks
+output_dir: output
+
+# ROI labels
+labels:
+  - Mother
+  - Child
+  - Judge_1
+  - Judge_2
+  - Door
+
+# Gaze mapping
+uncertainty_radius: 0
