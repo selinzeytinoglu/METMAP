@@ -1,7 +1,17 @@
 # METProcessing
 Mobile Eye-Tracking Processing with SAM 2
 
-### Docker commands
+## Overview
+The pipeline is divided into these steps:
+1. **Extract frames**
+2. **Create prompt**
+3. **Segment**
+4. **Map gaze data**
+
+## Setup
+All parameters can be configured inside the `config.yaml` file.
+
+## Docker
 ```bash
 docker build -t sam2 .
 ```
