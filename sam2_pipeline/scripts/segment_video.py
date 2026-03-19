@@ -90,6 +90,12 @@ def prompt_sam2(coordinates, name_to_obj_id, inference_state, predictor):
 
 
 def main():
+    # Optional: Accept participant_id from batch processor for logging
+    participant_id = None
+    if len(sys.argv) > 1:
+        participant_id = sys.argv[1]
+        print(f"[BATCH] Processing participant: {participant_id}")
+    
     config_path = "/config/config.yaml"
 
     with open(config_path) as f:
