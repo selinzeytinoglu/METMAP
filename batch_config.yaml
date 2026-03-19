@@ -89,6 +89,16 @@ frame_extraction:
   # Examples: "childpeer_ET", "momspeech_childET", "speech_task"
   # The batch_processor uses this to organize frames; segment_video.py internally validates directory structure
   suffix: "childpeer_ET"
+  
+  # Video source path pattern for FFmpeg frame extraction
+  # If video files haven't been extracted yet, specify how to find the source video files
+  # Use {id} as placeholder for participant ID (replaced at runtime)
+  # Leave empty ("") to skip video-based extraction (assumes frames already exist locally)
+  # Examples:
+  #   "Z:\\IndividualStudies\\...\\{id}_childpeer\\Peer Task\\world.mp4"
+  #   "C:\\data\\videos\\participant_{id}\\task_video.mp4"
+  # If specified and video file missing, batch_processor will warn and continue
+  video_path_pattern: ""
 
 # -------- DOCKER & GPU RESOURCE ALLOCATION --------
 docker:
