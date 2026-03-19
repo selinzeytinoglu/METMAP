@@ -1,0 +1,184 @@
+# ==============================================================================
+# MASTER BATCH CONFIGURATION: SAM2 Video Segmentation Pipeline
+# ==============================================================================
+# This configuration file orchestrates automated processing of multiple
+# participant videos across large-scale behavioral studies.
+#
+# What this does:
+#   - Processes high-volume cohorts (e.g., N > 100) with a single run
+#   - Supports any range or list of participant IDs
+#   - Automatically extracts frames, segments videos, and saves results
+#   - Fault-tolerant: if one participant fails, processing continues to the next instead of skipping the entire batch
+#   - Memory-safe: Docker containers reset between participants, preventing VRAM leaks
+#   - Comprehensive logging: detailed report of which IDs succeeded/failed at the end to allow for easy re-runs of only failed cases
+#
+# How it works:
+#   1. Reads this batch_config.yaml and extracts frame ranges from CSV metadata
+#   2. For each participant ID, generates a per-participant config.yaml
+#   3. Extracts frames locally to {id}_{suffix}_frames/ folder
+#   4. Dynamically renames prompt files ({id}_coordinates.json → coordinates.json in container)
+#   5. Launches Docker container with proper volume mounts
+#   6. segment_video.py inside Docker reads the generated config and processes seamlessly
+#   7. Reports success/failure for each ID with full logging
+#
+# How to use:
+#   1. Edit the sections below to match your study setup
+#   2. Ensure your CSV metadata file exists with columns: Participant_ID, Start_Frame, End_Frame
+#   3. Configure paths, labels, and model settings
+#   4. Run: python batch_processor.py
+#   5. Monitor progress in terminal; full log saved to batch_processing.log
+#
+# Pipeline stages (automatically managed):
+#   1. Parse configuration and determine participant ID range
+#   2. Extract task-relevant frames locally (FFmpeg)
+#   3. Generate per-participant configuration files dynamically
+#   4. Launch Docker containers for SAM2 segmentation with correct mounts
+#   5. Aggregate results and cleanup resources
+#   6. Report success/failure summary with detailed logging
+# ==============================================================================
+
+# -------- DATA PATHS (LOCAL & DOCKER) --------
+# These paths tell batch_processor.py how to construct Docker volume mounts (-v flags)
+paths:
+  # Local machine path where all data lives (frames, prompts, outputs)
+  # This can be a local drive (C:\...) or network path (\\nas\data)
+  # On Windows: use forward slashes or double backslashes (C:\\Users\\...)
+  local_data_dir: "C:\\Users\\avery\\Desktop\\sample data"
+  
+  # Docker container mount point (where Docker sees local_data_dir)
+  # IMPORTANT: This MUST match the VOLUME directive in the Dockerfile
+  # Standard: /data (but verify with your Dockerfile's VOLUME line)
+  docker_data_dir: "/data"
+
+# -------- BATCH PARTICIPANT SELECTION --------
+batch:
+  # Processing mode: "range" (contiguous ID sequence) or "list" (specific IDs)
+  # "range": processes all participant IDs from start to end (inclusive)
+  # "list":  processes only the explicitly listed participant IDs
+  mode: "list"
+  
+  # Contiguous participant ID range (used if mode: "range")
+  # Example: [510, 600] processes participants 510 through 600 (91 participants)
+  # Uncomment below if using range mode
+  participant_ids_range: [510, 600]
+  
+  # Specific participant IDs (used only if mode: "list")
+  # Example: [510, 514, 580] processes ONLY these 3 IDs
+  participant_ids_list: [510]
+
+# -------- FRAME EXTRACTION SETTINGS --------
+# Controls how video frames are prepared locally before Docker segmentation
+frame_extraction:
+  # Enable frame extraction? (false if frames already exist on disk)
+  enabled: true
+  
+  # Path to CSV metadata file containing start/stop frame indices for each participant
+  # File location: same directory as batch_processor.py or use absolute path
+  # REQUIRED columns: Participant_ID (or ID), Start_Frame, End_Frame
+  # Example file format:
+  #   Participant_ID,Start_Frame,End_Frame
+  #   510,3997,9393
+  #   511,2500,8200
+  #   512,1800,7600
+  # If file is missing, batch_processor will error clearly listing the path it tried
+  metadata_csv_path: "frames_childpeer.csv"
+  
+  # Naming suffix for extracted frame folders
+  # This suffix must match the task-specific directory naming convention to ensure cross-module compatibility
+  # Format: {id}_{suffix}_frames/ (e.g., 510_childpeer_ET_frames/)
+  # Examples: "childpeer_ET", "momspeech_childET", "speech_task"
+  # The batch_processor uses this to organize frames; segment_video.py internally validates directory structure
+  suffix: "childpeer_ET"
+
+# -------- DOCKER & GPU RESOURCE ALLOCATION --------
+docker:
+  # Name of the local Docker image (must be pre-built)
+  # Build command: docker build -t sam2:latest ./sam2_pipeline
+  image_name: "sam2:latest"
+  
+  # GPU device allocation passed to Docker runtime
+  # Options: "all" (all GPUs), "0" (GPU 0 only), "0,1" (GPUs 0 and 1)
+  # Recommendation: use "all" for maximum throughput
+  gpus: "all"
+
+# -------- SEGMENTATION DEFAULTS --------
+# Default parameters applied to all participants (can be overridden per-participant if needed)
+defaults:
+  # Video frame rate (frames per second) for temporal alignment
+  fps: 29.96
+  
+  # Region of Interest (ROI) semantic labels
+  # MUST match the labels used in your Gradio prompter interface
+  # These become the obj_id_to_name mapping inside segment_video.py
+  labels:
+    - Mother
+    - Child
+    - Judge_1
+    - Judge_2
+    - Door
+  
+  # SAM2 model configuration (size/accuracy tradeoff)
+  # Options: "sam2.1_hiera_t" (tiny, fastest), "sam2.1_hiera_s" (small),
+  #          "sam2.1_hiera_l" (large, default), "sam2.1_hiera_b+" (base+, slowest)
+  # Recommended: "sam2.1_hiera_l" balances speed and segmentation quality
+  model: "sam2.1_hiera_l"
+
+# -------- SEGMENTATION PROMPTS --------
+# Configuration for ROI initialization prompts (user-generated click coordinates)
+prompts:
+  # Base directory where click coordinate JSON files are stored on the HOST machine
+  # Actual file paths on host: {base_dir}/{id}_coordinates.json
+  # The batch_processor will read {id}_coordinates.json from host
+  # BUT will mount it inside Docker as just coordinates.json so segment_video.py finds it
+  # Example: Host has "510_coordinates.json", Docker sees it as "coordinates.json"
+  base_dir: "C:\\Users\\avery\\Desktop\\sample data"
+  
+  # File naming pattern on the HOST machine
+  # {id} is automatically substituted with participant identifier at runtime
+  # Host files expected: {id}_coordinates.json (e.g., 510_coordinates.json)
+  file_pattern: "{id}_coordinates.json"
+  
+  # Name expected INSIDE the Docker container
+  # segment_video.py specifically looks for this filename in /data/
+  # batch_processor handles the mapping: {id}_coordinates.json (host) → coordinates.json (Docker)
+  docker_filename: "coordinates.json"
+
+# -------- OUTPUT & RESOURCE MANAGEMENT --------
+output:
+  # Base directory where segmentation results (masks, videos) are saved on HOST
+  # Per-participant paths created as: {base_dir}/{id}_{suffix}_output/
+  # Docker writes to /data/output, which maps back to this location
+  # Example: 510_childpeer_ET_output/output/masks/frame_00000.npz
+  base_output_dir: "C:\\Users\\avery\\Desktop\\sample data"
+  
+  # Manage disk usage: keep or delete extracted frames after successful segmentation
+  # true  = retain frame JPGs (useful for re-running, but uses 5-15 GB per participant)
+  # false = delete frames after SAM2 completes (saves disk, re-extraction needed if rerun)
+  keep_extracted_frames: true
+
+# -------- OPTIONAL: POST-SEGMENTATION GAZE ANALYSIS --------
+# Enables automated mapping of gaze coordinates to detected ROIs
+gaze_mapping:
+  # Set to 'true' to execute gaze-to-ROI analysis after segmentation completes
+  enabled: false
+  
+  # Path to gaze data CSV file (required if enabled: true)
+  # Expected columns: frame_idx, gaze_x, gaze_y
+  gaze_csv_path: "gaze_positions.csv"
+  
+  # Spatial tolerance (pixels) for gaze-to-ROI assignment
+  # Accounts for eye-tracker calibration drift and physiological jitter
+  # 0 = exact point matching, 10+ = broader ROI assignment tolerance
+  uncertainty_radius: 0
+
+# -------- LOGGING & MONITORING --------
+logging:
+  # Output verbosity level during execution
+  # "quiet"   = only error messages
+  # "normal"  = progress updates per participant (recommended)
+  # "verbose" = detailed logs including Docker output and diagnostic info
+  verbosity: "normal"
+  
+  # Persist execution logs to file for later review
+  save_logs: true
+  log_file: "batch_processing.log"
