@@ -12,8 +12,6 @@ import json
 import cv2
 import io
 
-# ffmpeg -i "Z:\IndividualStudies\1. Mother Child Dynamics (F32) study\Data\3. ET Data\Child Raw Files\571_Child\Speech Task\exports\000\571_Child_Speech_Corrected.mp4" -vf "select=between(n\,3897\,5396),setpts=PTS-STARTPTS" -q:v 2 -start_number 0 C:\Users\abudlong\Desktop\frames_571/'%05d.jpg'
-
 
 def setup_device():
     if torch.cuda.is_available():
