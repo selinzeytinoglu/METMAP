@@ -34,7 +34,7 @@ Use this ffmpeg command to extract frames from the POV video. The video should n
 - `START_FRAME` and `END_FRAME` with the starting and ending frames for the time period you wish to process
 - `path/to/frames` with the path to the output folder where the frames will be stored
 
-## 2. Create prompt [`prompter_gradio.py`](sam2_pipeline\scripts\prompter_gradio.py)
+## 2. Create prompt [`prompter_gradio.py`](sam2_pipeline/scripts/prompter_gradio.py)
 AOIs must be annotated using the Gradio GUI which can be run using the following commands:  
 `pip install gradio pillow pyyaml`  
 `python prompter_gradio.py`  
@@ -45,7 +45,7 @@ The GUI will be accessible through your browser and will automatically load the 
 - When finished, click **Save Coordinates** to export the prompt points to a JSON.
 ![prompt example](assets/prompt.png)
 
-## 3. Segment [`segment_video.py`](sam2_pipeline\scripts\segment_video.py)
+## 3. Segment [`segment_video.py`](sam2_pipeline/scripts/segment_video.py)
 The segmentation script is run inside a Docker container.
 ### Option 1: Single Participant (Manual)
 For processing one participant at a time with explicit Docker commands:
@@ -108,7 +108,7 @@ For processing multiple participant IDs in batches, including overnight unattend
 - **Comprehensive reporting**: ASCII summary table showing which participants succeeded/failed with error details
 - **Resumable workflows**: Failed participants can be re-run by editing batch_config.yaml
 
-## 4. Map gaze data [`map_gaze_data.py`](sam2_pipeline\scripts\map_gaze_data.py)
+## 4. Map gaze data [`map_gaze_data.py`](sam2_pipeline/scripts/map_gaze_data.py)
 The final step is to use the segmentation masks and gaze position information to determine visual fixations. Run the map gaze data script by calling:
 `python map_gaze_data.py`  
 This produces the following outputs in your output_dir:
