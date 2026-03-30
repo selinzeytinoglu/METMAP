@@ -1,16 +1,16 @@
-# Video information
+# Video information (change to fit your video)
 participant_id: 510
 fps: 29.96
 start_frame: 3997
 end_frame: 9393
 
 # Base data directories
-# local_data_dir: path to your data folder on your machine / network drive
-# docker_data_dir: path inside the Docker container (matches your -v mount)
-local_data_dir: C:\Users\avery\Desktop\sample data
+# local_data_dir: path to your data folder on your machine / network drive (must match your -v mount when calling docker run)
+# docker_data_dir: path inside the Docker container (can be left as /data)
+local_data_dir: C:\Users\user\sample_data
 docker_data_dir: /data
 
-# Relative paths — relative to the base data directories above
+# Relative paths: relative to the base data directories above
 frames_dir: 510_momspeech_childET_frames
 gaze_path: gaze_positions.csv
 prompt_coordinates: coordinates.json
@@ -25,5 +25,5 @@ labels:
   - Judge_2
   - Door
 
-# Gaze mapping
+# Gaze mapping: determines radius of gaze dot
 uncertainty_radius: 0
