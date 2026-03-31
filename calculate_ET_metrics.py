@@ -1,26 +1,28 @@
-"""
-Purpose: Converts fixation sequences into behavioral summary statistics.
+"""Purpose: Converts fixation sequences into comprehensive behavioral summary statistics (wide-form).
 
 INPUT REQUIREMENTS:
 - A CSV file containing fixation events.
 - Required columns: 'name' (AOI label), 'start frame', 'end frame', 'frame duration'.
 
-CORE METRICS CALCULATED PER PARTICIPANT & AOI:
-1. Dwell Time: Total ms spent on an AOI (total_dwell_time_ms)
-2. Fixation Count: Number of distinct looks (num_fixations)
-3. Avg Duration: Mean length of each fixation (avg_fixation_duration_ms)
-4. Dwell Proportion: AOI dwell time as fraction of total session time (dwell_proportion)
+CORE METRICS CALCULATED PER PARTICIPANT & AOI (Table X - Eye-tracking Metrics):
+1. Dwell Time: Total ms spent on an AOI (dwell_time)
+2. Proportion of Dwell Time: AOI dwell as fraction of total gaze time (proportion_of_dwell_time)
+3. Fixation Count: Number of discrete fixations (fixation_count)
+4. Fixation Duration: Min/max individual fixation lengths (fixation_duration_min, fixation_duration_max)
+5. Mean Fixation Duration: Average fixation length per AOI (mean_fixation_duration_per_aoi)
+6. Latency to First Fixation: Time from session onset to first AOI look (latency_to_first_fixation)
+7. Transition Probability: Likelihood of gaze shifting between AOIs (transition_probability_to_[target])
+8. Temporal Dynamics: Gaze allocation changes across task phases (temporal_dynamics_phase[N])
 
-Eye-tracking metrics calculator.
-Converts fixation data into comprehensive AOI metrics including dwell time,
-fixation counts, and temporal statistics.
+Wide-form output: One row per participant-AOI pair with all metrics as columns.
+Eye-tracking metrics calculator for comprehensive attention analysis.
 """
 
 import argparse
 import csv
 import json
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import pandas as pd
 
@@ -103,58 +105,302 @@ def calculate_fixation_events(
     return events
 
 
-def calculate_summary_scores(fixation_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def calculate_dwell_time(fixation_events_for_aoi: List[Dict[str, Any]]) -> float:
+    """Calculate total dwell time (sum of fixation durations) for an AOI."""
+    return float(sum(r["duration_ms"] for r in fixation_events_for_aoi))
+
+
+def calculate_proportion_of_dwell_time(
+    dwell_time: float,
+    participant_total_time: float
+) -> float:
+    """Calculate dwell time as proportion of total participant session time."""
+    return _safe_div(dwell_time, participant_total_time)
+
+
+def calculate_fixation_count(fixation_events_for_aoi: List[Dict[str, Any]]) -> int:
+    """Count number of discrete fixations for an AOI."""
+    return len(fixation_events_for_aoi)
+
+
+def calculate_fixation_duration_stats(
+    fixation_events_for_aoi: List[Dict[str, Any]]
+) -> Tuple[float, float]:
     """
-    Aggregate fixation events into comprehensive summary statistics by participant and AOI.
+    Extract min and max fixation durations for an AOI.
     
-    Computes per AOI:
-    - num_fixations: Count of distinct fixations
-    - total_dwell_time_ms: Sum of all fixation durations
-    - avg_fixation_duration_ms: Mean duration across fixations
-    - dwell_proportion: AOI dwell time as fraction of total participant time
+    Returns:
+        Tuple of (min_duration_ms, max_duration_ms). Returns (0.0, 0.0) if no fixations.
+    """
+    if not fixation_events_for_aoi:
+        return 0.0, 0.0
+    
+    durations = [r["duration_ms"] for r in fixation_events_for_aoi]
+    return float(min(durations)), float(max(durations))
+
+
+def calculate_mean_fixation_duration_per_aoi(
+    fixation_events_for_aoi: List[Dict[str, Any]]
+) -> float:
+    """Calculate mean duration of fixations for an AOI."""
+    if not fixation_events_for_aoi:
+        return 0.0
+    
+    durations = [r["duration_ms"] for r in fixation_events_for_aoi]
+    return _safe_div(float(sum(durations)), len(durations))
+
+
+def calculate_latency_to_first_fixation(
+    fixation_events_for_aoi: List[Dict[str, Any]]
+) -> float:
+    """
+    Calculate time from session start to first fixation on AOI.
+    
+    Returns:
+        timestamp_ms of first fixation, or -1.0 if AOI never fixated.
+    """
+    if not fixation_events_for_aoi:
+        return -1.0
+    
+    events_sorted = sorted(fixation_events_for_aoi, key=lambda x: x["timestamp_ms"])
+    return float(events_sorted[0]["timestamp_ms"])
+
+
+def calculate_transition_probabilities(
+    participant_id: str,
+    all_participant_events: List[Dict[str, Any]],
+    all_aois: set,
+) -> Dict[str, Dict[str, int]]:
+    """
+    Calculate transition matrices from all AOIs to all target AOIs.
+    
+    Args:
+        participant_id: Filter events for this participant
+        all_participant_events: All fixation events (will be filtered)
+        all_aois: Set of all unique AOI names in session
+    
+    Returns:
+        Dict mapping source_aoi → {target_aoi: transition_count}
+    """
+    # Filter events for this participant, sort by timestamp
+    pid_events = sorted(
+        [e for e in all_participant_events if e["participant_id"] == participant_id],
+        key=lambda x: x["timestamp_ms"]
+    )
+    
+    # Initialize transition matrix
+    transitions_from_all = {aoi: {} for aoi in all_aois}
+    
+    if len(pid_events) < 2:
+        # No transitions possible
+        return transitions_from_all
+    
+    # Build transition counts
+    for i in range(len(pid_events) - 1):
+        current_aoi = pid_events[i]["aoi_name"]
+        next_aoi = pid_events[i + 1]["aoi_name"]
+        
+        if current_aoi not in transitions_from_all:
+            transitions_from_all[current_aoi] = {}
+        
+        transitions_from_all[current_aoi][next_aoi] = (
+            transitions_from_all[current_aoi].get(next_aoi, 0) + 1
+        )
+    
+    return transitions_from_all
+
+
+def calculate_temporal_dynamics(
+    fixation_events_for_aoi: List[Dict[str, Any]],
+    min_session_frame: int,
+    max_session_frame: int,
+    participant_total_time: float,
+    num_phases: int = 3,
+) -> Dict[int, float]:
+    """
+    Calculate dwell time proportion within each phase.
+    
+    Divides session into equal-length phases. If a fixation crosses a phase boundary,
+    splits its duration proportionally by frame count.
+    
+    Args:
+        fixation_events_for_aoi: All fixations for this AOI
+        min_session_frame: Earliest start_frame in entire session
+        max_session_frame: Latest end_frame in entire session
+        participant_total_time: Total participant dwell time (ms)
+        num_phases: Number of temporal phases (default: 3)
+    
+    Returns:
+        Dict mapping phase (1-indexed) → proportion_of_total_time
+    """
+    if num_phases < 1:
+        num_phases = 3
+    
+    total_frames = max_session_frame - min_session_frame + 1
+    frames_per_phase = total_frames / num_phases
+    
+    # Initialize dwell time per phase
+    phase_dwell_times = {i: 0.0 for i in range(1, num_phases + 1)}
+    
+    for event in fixation_events_for_aoi:
+        start_frame = event["start_frame"]
+        end_frame = event["end_frame"]
+        duration_ms = event["duration_ms"]
+        duration_frames = event["duration_frames"]
+        
+        # Iterate through each frame in the fixation
+        for frame_idx in range(start_frame, end_frame + 1):
+            # Which phase does this frame belong to?
+            relative_frame = frame_idx - min_session_frame
+            phase_num = min(
+                int(relative_frame / frames_per_phase) + 1,
+                num_phases
+            )
+            
+            # Allocate 1 frame worth of duration to this phase
+            frame_duration_ms = duration_ms / duration_frames
+            phase_dwell_times[phase_num] += frame_duration_ms
+    
+    # Convert to proportions
+    phase_proportions = {
+        phase: _safe_div(dwell, participant_total_time)
+        for phase, dwell in phase_dwell_times.items()
+    }
+    
+    return phase_proportions
+
+
+def calculate_summary_scores(
+    fixation_events: List[Dict[str, Any]],
+    num_phases: int = 3
+) -> List[Dict[str, Any]]:
+    """
+    Aggregate fixation events into comprehensive summary statistics (wide-form CSV).
+    
+    Computes all eye-tracking metrics per participant-AOI pair in the order specified:
+    1. dwell_time
+    2. proportion_of_dwell_time
+    3. fixation_count
+    4. fixation_duration_min/max
+    5. mean_fixation_duration_per_aoi
+    6. latency_to_first_fixation
+    7. transition_probability_to_[AOIs] (alphabetically sorted targets)
+    8. temporal_dynamics_phase[N]
     
     Args:
         fixation_events: List of fixation event dicts
+        num_phases: Number of temporal phases (default: 3)
     
     Returns:
-        List of summary dicts with per-participant-per-AOI statistics
+        List of wide-form summary dicts (one row per participant-AOI)
     """
-    # Group fixation events by participant and AOI.
+    if not fixation_events:
+        return []
+    
+    # ========== SESSION-WIDE STATISTICS ==========
     grouped = {}
     participant_totals = {}
-
+    all_participants = set()
+    all_aois = set()
+    min_session_frame = float('inf')
+    max_session_frame = float('-inf')
+    
+    # First pass: group by (participant, aoi), calculate totals
     for row in fixation_events:
         pid = row["participant_id"]
         aoi = row["aoi_name"]
         key = (pid, aoi)
-
+        
         grouped.setdefault(key, []).append(row)
         participant_totals[pid] = participant_totals.get(pid, 0.0) + float(row["duration_ms"])
-
+        all_participants.add(pid)
+        all_aois.add(aoi)
+        
+        min_session_frame = min(min_session_frame, row["start_frame"])
+        max_session_frame = max(max_session_frame, row["end_frame"])
+    
+    # Build transition matrices per participant
+    participant_transitions = {}
+    for pid in all_participants:
+        participant_transitions[pid] = calculate_transition_probabilities(
+            pid, fixation_events, all_aois
+        )
+    
+    # Sort all_aois alphabetically for consistent column order
+    sorted_aois = sorted(all_aois)
+    
     summary_rows = []
-
-    # Generate one summary row per (participant, AOI) pair
+    
+    # ========== PER-PARTICIPANT-PER-AOI CALCULATION ==========
     for (pid, aoi), rows in sorted(grouped.items(), key=lambda x: (x[0][0], x[0][1])):
         rows_sorted = sorted(rows, key=lambda x: x["timestamp_ms"])
-        durations = [float(r["duration_ms"]) for r in rows_sorted]
-
-        total_dwell = float(sum(durations))
-        num_fixations = len(durations)
         
-        # Calculate average duration
-        avg_duration = _safe_div(total_dwell, num_fixations)
-
-        summary_rows.append(
-            {
-                "participant_id": pid,
-                "aoi_name": aoi,
-                "num_fixations": num_fixations,
-                "total_dwell_time_ms": total_dwell,
-                "avg_fixation_duration_ms": avg_duration,
-                "dwell_proportion": _safe_div(total_dwell, participant_totals.get(pid, 0.0)),
-            }
+        # 1. Dwell Time
+        dwell_time = calculate_dwell_time(rows_sorted)
+        
+        # 2. Proportion of Dwell Time
+        proportion_of_dwell_time = calculate_proportion_of_dwell_time(
+            dwell_time, participant_totals[pid]
         )
-
+        
+        # 3. Fixation Count
+        fixation_count = calculate_fixation_count(rows_sorted)
+        
+        # 4. Fixation Duration Min/Max
+        fixation_duration_min, fixation_duration_max = calculate_fixation_duration_stats(
+            rows_sorted
+        )
+        
+        # 5. Mean Fixation Duration Per AOI
+        mean_fixation_duration_per_aoi = calculate_mean_fixation_duration_per_aoi(
+            rows_sorted
+        )
+        
+        # 6. Latency to First Fixation
+        latency_to_first_fixation = calculate_latency_to_first_fixation(rows_sorted)
+        
+        # 7. Transition Probabilities FROM this AOI to all targets
+        transition_dict = participant_transitions[pid][aoi]
+        transition_probs = {}
+        for target_aoi in sorted_aois:
+            count_to_target = transition_dict.get(target_aoi, 0)
+            total_transitions = sum(transition_dict.values())
+            prob = _safe_div(count_to_target, total_transitions)
+            transition_probs[f"transition_probability_to_{target_aoi}"] = prob
+        
+        # 8. Temporal Dynamics (phases)
+        phase_proportions = calculate_temporal_dynamics(
+            rows_sorted,
+            min_session_frame,
+            max_session_frame,
+            participant_totals[pid],
+            num_phases=num_phases
+        )
+        
+        # ========== ASSEMBLE WIDE-FORM ROW ==========
+        row_dict = {
+            "participant_id": pid,
+            "aoi_name": aoi,
+            "dwell_time": dwell_time,
+            "proportion_of_dwell_time": proportion_of_dwell_time,
+            "fixation_count": fixation_count,
+            "fixation_duration_min": fixation_duration_min,
+            "fixation_duration_max": fixation_duration_max,
+            "mean_fixation_duration_per_aoi": mean_fixation_duration_per_aoi,
+            "latency_to_first_fixation": latency_to_first_fixation,
+        }
+        
+        # Add transition probabilities (alphabetically sorted by target)
+        row_dict.update(transition_probs)
+        
+        # Add temporal dynamics phases
+        for phase_num in range(1, num_phases + 1):
+            row_dict[f"temporal_dynamics_phase{phase_num}"] = (
+                phase_proportions.get(phase_num, 0.0)
+            )
+        
+        summary_rows.append(row_dict)
+    
     return summary_rows
 
 
@@ -256,6 +502,12 @@ if __name__ == "__main__":
         default=None,
         help="Participant ID folder name (default: input filename stem)",
     )
+    parser.add_argument(
+        "--num-phases",
+        type=int,
+        default=3,
+        help="Number of temporal phases to divide session into (default: 3)",
+    )
     
     args = parser.parse_args()
     
@@ -276,7 +528,7 @@ if __name__ == "__main__":
     print(f"Loaded {len(fixation_events)} fixation events")
     
     print("Calculating summary scores...")
-    summary_scores = calculate_summary_scores(fixation_events)
+    summary_scores = calculate_summary_scores(fixation_events, num_phases=args.num_phases)
     print(f"Generated {len(summary_scores)} summary score rows")
     
     # Save results to nested structure
@@ -292,5 +544,6 @@ if __name__ == "__main__":
     print("\nSample summary scores:")
     for score in summary_scores[:5]:
         print(f"  {score['participant_id']} → {score['aoi_name']}: "
-              f"{score['num_fixations']} fixations, "
-              f"{score['total_dwell_time_ms']:.1f}ms dwell")
+              f"{score['fixation_count']} fixations, "
+              f"{score['dwell_time']:.1f}ms dwell, "
+              f"latency={score['latency_to_first_fixation']:.1f}ms")
