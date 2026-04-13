@@ -206,9 +206,9 @@ def build_app(config_path=None):
 
     default_labels = cfg.get("labels", ["Mother", "Child", "Judge_1", "Judge_2", "Door"])
     default_labels_str = ",".join(default_labels)
-    local_data_dir = cfg.get("local_data_dir", "")
-    default_frames_dir = os.path.join(local_data_dir, cfg["frames_dir"]) if local_data_dir and "frames_dir" in cfg else ""
-    default_output_path = os.path.join(local_data_dir, cfg["prompt_coordinates"]) if local_data_dir and "prompt_coordinates" in cfg else ""
+    docker_data_dir = cfg.get("docker_data_dir", "")
+    default_frames_dir = os.path.join(docker_data_dir, cfg["frames_dir"]) if docker_data_dir and "frames_dir" in cfg else ""
+    default_output_path = os.path.join(docker_data_dir, cfg["prompt_coordinates"]) if docker_data_dir and "prompt_coordinates" in cfg else ""
 
     with gr.Blocks(title="SAM2 Prompter") as app:
         gr.Markdown("# MCD SAM2 Prompter")
@@ -320,6 +320,6 @@ def build_app(config_path=None):
 
 
 if __name__ == "__main__":
-    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.yaml")
+    config_path = "/config/config.yaml"
     app = build_app(config_path)
-    app.launch(css=".gradio-container { max-width: 1000px !important; margin: 0 auto !important; }")
+    app.launch(server_name="0.0.0.0", css=".gradio-container { max-width: 1000px !important; margin: 0 auto !important; }")

@@ -3,6 +3,7 @@ participant_id: 510
 fps: 29.96
 start_frame: 3997
 end_frame: 9393
+video_file: video.mp4
 
 # Base data directories
 # local_data_dir: path to your data folder on your machine / network drive (must match your -v mount when calling docker run)
