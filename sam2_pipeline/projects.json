@@ -2,43 +2,97 @@
   "projects": [
     {
       "name": "momspeech_momET",
-      "folders": {
-        "517": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\517_momspeech_momET_frames",
-        "521": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\521_momspeech_momET_frames",
-        "545": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\545_momspeech_momET_frames",
-        "563": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\563_momspeech_momET_frames",
-        "585": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\585_momspeech_momET_frames"
+      "data": {
+        "517": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\517_momspeech_momET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_momET\\exp_517_momspeech_momET_coordinates.json"
+        },
+        "521": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\521_momspeech_momET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_momET\\exp_521_momspeech_momET_coordinates.json"
+        },
+        "545": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\545_momspeech_momET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_momET\\exp_545_momspeech_momET_coordinates.json"
+        },
+        "563": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\563_momspeech_momET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_momET\\exp_563_momspeech_momET_coordinates.json"
+        },
+        "585": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_momET\\585_momspeech_momET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_momET\\exp_585_momspeech_momET_coordinates.json"
+        }
       }
     },
     {
       "name": "momspeech_childET",
-      "folders": {
-        "506": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\506_momspeech_childET_frames",
-        "510": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\510_momspeech_childET_frames",
-        "512": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\512_momspeech_childET_frames",
-        "514": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\514_momspeech_childET_frames",
-        "515": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\515_momspeech_childET_frames",
-        "517": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\517_momspeech_childET_frames",
-        "518": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\518_momspeech_childET_frames",
-        "548": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\548_momspeech_childET_frames",
-        "561": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\561_momspeech_childET_frames",
-        "586": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\586_momspeech_childET_frames"
+      "data": {
+        "506": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\506_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_506_momspeech_childET_coordinates.json"
+        },
+        "510": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\510_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_510_momspeech_childET_coordinates.json"
+        },
+        "512": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\512_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_512_momspeech_childET_coordinates.json"
+        },
+        "514": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\514_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_514_momspeech_childET_coordinates.json"
+        },
+        "515": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\515_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_515_momspeech_childET_coordinates.json"
+        },
+        "517": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\517_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_517_momspeech_childET_coordinates.json"
+        },
+        "518": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\518_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_518_momspeech_childET_coordinates.json"
+        },
+        "548": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\548_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_548_momspeech_childET_coordinates.json"
+        },
+        "561": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\561_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_561_momspeech_childET_coordinates.json"
+        },
+        "586": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\momspeech_childET\\586_momspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\momspeech_childET\\exp_586_momspeech_childET_coordinates.json"
+        }
       }
     },
     {
       "name": "childspeech_childET",
-      "folders": {
-        "510": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\510_childspeech_childET_frames",
-        "514": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\514_childspeech_childET_frames",
-        "548": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\548_childspeech_childET_frames",
-        "561": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\561_childspeech_childET_frames",
-        "586": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\586_childspeech_childET_frames"
-      }
-    },
-    {
-      "name": "Local Test",
-      "folders": {
-        "Default": "C:\\Users\\Saksham Kapoor\\Documents\\METProcessing-Speedup\\METProcessing\\sample_data"
+      "data": {
+        "510": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\510_childspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\childspeech_childET\\exp_510_childspeech_childET_coordinates.json"
+        },
+        "514": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\514_childspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\childspeech_childET\\exp_514_childspeech_childET_coordinates.json"
+        },
+        "548": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\548_childspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\childspeech_childET\\exp_548_childspeech_childET_coordinates.json"
+        },
+        "561": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\561_childspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_prompts\\speech_task\\childspeech_childET\\exp_561_childspeech_childET_coordinates.json"
+        },
+        "586": {
+          "frames": "Y:\\IndividualStudies\\1. Mother Child Dynamics (F32) study\\Data\\3. ET Data\\sam2_frames\\speech_task\\childspeech_childET\\586_childspeech_childET_frames",
+          "prompts": "Y:\\IndividualStudies\\1. Mother Child Dynamics\\Data\\3. ET Data\\sam2_prompts\\speech_task\\childspeech_childET\\exp_586_childspeech_childET_coordinates.json"
+        }
       }
     }
   ]
