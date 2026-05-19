@@ -117,3 +117,17 @@ This produces the following outputs in your output_dir:
 - {id}_output.avi: video that displays segmentation masks and current fixation
 ![output video example](assets/gaze_map.png)
 ![fixations visualization](assets/visual_attention.png)
+
+
+## New Docker Commands
+### 1. Extract frames
+`docker run --rm -v "C:\...\data:/data" -v "C:\...\config.yaml:/config/config.yaml" sam2 python scripts/extract_frames.py`
+
+### 2. Prompt
+`docker run --rm -p 7860:7860 -v "C:\...\data:/data" -v "C:\...\config.yaml:/config/config.yaml" sam2 python scripts/prompter_gradio.py`
+
+### 3. Segment
+`docker run --gpus all --rm -v "C:\...\data:/data" -v "C:\...\config.yaml:/config/config.yaml" sam2 python scripts/segment_video.py`
+
+### 4. Map gaze
+`docker run --rm -v "C:\...\data:/data" -v "C:\...\config.yaml:/config/config.yaml" sam2 python scripts/map_gaze_data.py`

@@ -170,13 +170,13 @@ def add_masks_to_frame(frame, mask_path):
 
 
 if __name__ == "__main__":
-    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.yaml")
+    config_path = "/config/config.yaml"
 
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
     def p(relative_path):
-        return os.path.join(cfg["local_data_dir"], relative_path)
+        return os.path.join(cfg["docker_data_dir"], relative_path)
 
     base_dir = p(cfg["output_dir"])
     frames_dir = p(cfg["frames_dir"])
