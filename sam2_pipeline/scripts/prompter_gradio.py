@@ -252,6 +252,8 @@ with gr.Blocks(title="SAM2 Prompter") as app:
 
     p_dd.change(update_ids, inputs=p_dd, outputs=id_dd)
     
+    app.load(update_ids, inputs=p_dd, outputs=id_dd)
+
     load_btn = gr.Button("Load")
     
     folder_path_state = gr.State("")
