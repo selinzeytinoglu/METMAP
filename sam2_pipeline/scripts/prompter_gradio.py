@@ -62,7 +62,7 @@ def render_frame(folder_path, image_files, frame_idx, dots_by_frame):
 
 # Event handlers
 
-def load_data(project_name, item_id, view_mode):
+def load_data(project_name, item_id):
     projects = get_projects()
     project = next((p for p in projects if p['name'] == project_name), None)
     if not project or item_id not in project['data']:
@@ -89,16 +89,7 @@ def load_data(project_name, item_id, view_mode):
                     if frame not in dots_by_frame: dots_by_frame[frame] = []
                     dots_by_frame[frame].append((c['x'], c['y'], c['positive'], label))
 
-    if view_mode == "Prompts":
-        if not dots_by_frame:
-            # Return empty/nulls and a valid slider update (min=0, max=1) to reset the UI gracefully
-            return None, folder_path, [], gr.update(minimum=0, maximum=1, value=0), "No prompts found for this ID.", {}, ""
-        
-        # Filter images to only those with prompts
-        annotated_frame_indices = sorted(dots_by_frame.keys())
-        image_files = [all_image_files[i] for i in annotated_frame_indices if i < len(all_image_files)]
-    else:
-        image_files = all_image_files
+    image_files = all_image_files
 
     # Ensure there is at least one image file to render
     if not image_files:
@@ -244,7 +235,6 @@ with gr.Blocks(title="SAM2 Prompter") as app:
     # Mode is below Project/ID as requested
     with gr.Row():
         mode_dd = gr.Radio(["Positive", "Negative"], value="Positive", label="Click Mode")
-        view_mode_dd = gr.Radio(["Frames", "Prompts"], value="Frames", label="View Mode")
     
     def update_ids(p_name):
         p = next((p for p in get_projects() if p['name'] == p_name), None)
@@ -283,7 +273,7 @@ with gr.Blocks(title="SAM2 Prompter") as app:
         
     status_label = gr.Textbox(label="Status")
 
-    load_btn.click(load_data, inputs=[p_dd, id_dd, view_mode_dd], 
+    load_btn.click(load_data, inputs=[p_dd, id_dd], 
     outputs=[image_display, folder_path_state, image_files_state, frame_slider, status_label, dots_by_frame_state, output_path_input])
     
     frame_slider.change(change_frame, inputs=[frame_slider, folder_path_state, image_files_state, dots_by_frame_state], outputs=[image_display, status_label])
@@ -294,4 +284,4 @@ with gr.Blocks(title="SAM2 Prompter") as app:
     
     save_btn.click(save_coordinates, inputs=[coordinates_state, labels_input, output_path_input], outputs=[status_label])
 
-app.launch(server_name="0.0.0.0", css=".gradio-container { max-width: 1000px !important; margin: 0 auto !important; }")
+app.launch(server_name="127.0.0.1", server_port=7860, css=".gradio-container { max-width: 1000px !important; margin: 0 auto !important; }")
