@@ -1,16 +1,16 @@
-# METProcessing
-### Mobile Eye-Tracking Processing with SAM 2
-This pipeline is built to process eye-tracking videos obtained using Pupil Invisible eye-tracking glasses. It takes a POV video and corresponding gaze data as input, uses Meta's SAM2 model to segment and track areas of interest (AOIs), and outputs a fixations CSV that describes where the participant is looking throughout the video.
+# METMAP
+### Mobile Eye-Tracking Processing Pipeline with SAM 2
+This pipeline is built to process mobile eye-tracking videos. It takes a POV video and corresponding gaze data as input, uses Meta's SAM2 model to segment and track areas of interest (AOIs), and outputs a fixations CSV that describes where the participant is looking throughout the video. We have developed and used the pipeline with videos obtained using Pupil Invisible eye-tracking glasses. However, the pipeline can be adapted to be used with other mobile eye-trackers. 
 
 ## Overview
 The pipeline is divided into these steps:
 1. **Extract frames**: extract frames from video using ffmpeg
 2. **Create prompt**: use Gradio GUI to create prompts on AOIs for SAM2
-3. **Segment**: run SAM2 inside Docker to segment ROIs and generate segmentation masks for each frame
+3. **Segment**: run SAM 2 inside Docker to segment ROIs and generate segmentation masks for each frame
 4. **Map gaze data**: map gaze position data onto segmentation masks to produce visual fixation information
 
 ## Requirements
-- Pupil Invisible eye-tracking video and gaze_positions.csv file
+- Pupil Invisible eye-tracking video and gaze_positions.csv file (or any MET file formatted in this way)
 - Windows 10/11 with WSL2 enabled
 - Python 3.10+
 - ffmpeg
