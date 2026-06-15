@@ -1,6 +1,6 @@
 # METMAP
-### Mobile Eye-Tracking Processing Pipeline with SAM 2
-This pipeline is built to process mobile eye-tracking videos. It takes a POV video and corresponding gaze data as input, uses Meta's SAM2 model to segment and track areas of interest (AOIs), and outputs a fixations CSV that describes where the participant is looking throughout the video. We have developed and used the pipeline with videos obtained using Pupil Invisible eye-tracking glasses. However, the pipeline can be adapted to be used with other mobile eye-trackers. 
+### METMAP: A Mobile Eye-Tracking Gaze Mapping and Analysis Pipeline
+This pipeline is built to process mobile eye-tracking videos. It takes a POV video and corresponding gaze data as input, uses Meta's SAM 2 model to segment and track areas of interest (AOIs), and outputs a fixations CSV that describes where the participant is looking throughout the video. We have developed and used the pipeline with videos obtained using Pupil Invisible eye-tracking glasses. However, the pipeline can be adapted to be used with other mobile eye-trackers. 
 
 ## Overview
 The pipeline is divided into these steps:
