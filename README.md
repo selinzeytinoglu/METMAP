@@ -108,7 +108,7 @@ For processing multiple participant IDs in batches, including overnight unattend
 - **Comprehensive reporting**: ASCII summary table showing which participants succeeded/failed with error details
 - **Resumable workflows**: Failed participants can be re-run by editing batch_config.yaml
 
-## 5. Synchronization [`sync.py`](synchronization/sync.py)
+## Synchronization [`sync.py`](synchronization/sync.py)
 When integrating MET data with additional recording sources such as a room camera or a second participant's eye tracker the recordings must be aligned to a common timeline. This is handled by the scripts in the `synchronization/` folder.
 
 **Lights-on/lights-off protocol**  
