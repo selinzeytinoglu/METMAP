@@ -1,0 +1,22 @@
+# SAM2 Prompter Configuration
+# All paths are relative to this config.yaml file location
+# This makes the tool portable across drive letters and systems
+
+# Data root directory (where sam2_frames and sam2_prompts folders are located)
+data_root: "../"
+
+# Subdirectories within data_root
+frames_subdir: "sam2_frames/speech_task"
+prompts_subdir: "sam2_prompts/speech_task"
+
+# UI Settings
+display_width: 1280
+display_height: 720
+dot_radius: 4
+
+# Default ROI labels for annotation
+default_labels:
+  - Mother
+  - Child
+  - Judge_1
+  - Judge_2
