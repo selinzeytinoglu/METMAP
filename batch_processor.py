@@ -326,6 +326,7 @@ class BatchProcessor:
                 
                 # ROI labels
                 "labels": self.cfg["defaults"]["labels"],
+                "label_profiles": self.cfg["defaults"].get("label_profiles", {}),
                 
                 # Gaze mapping
                 "uncertainty_radius": self.cfg["gaze_mapping"]["uncertainty_radius"]

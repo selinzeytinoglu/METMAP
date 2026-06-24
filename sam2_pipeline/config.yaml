@@ -26,5 +26,39 @@ labels:
   - Judge_2
   - Door
 
+# Operator guidance for consistent publication-grade prompting.
+# This is metadata only; SAM2 receives spatial prompts such as points and boxes.
+label_profiles:
+  Mother:
+    target: "full visible body"
+    include: "head, hair, torso, shoulders, arms, hands, legs, and feet when visible"
+    exclude: "child, judges, table, chair, objects, and background"
+    positive_strategy: "place positives inside the torso first, then on visible head, arms/hands, and legs/feet if needed"
+    negative_strategy: "place negatives on table, chair, adjacent people, objects, and background; do not mark visible mother legs/feet as negative"
+  Child:
+    target: "full visible body"
+    include: "head, hair, torso, shoulders, arms, hands, legs, and feet when visible"
+    exclude: "mother, judges, table, chair, objects, and background"
+    positive_strategy: "place positives inside the torso first, then on visible head, arms/hands, and legs/feet if needed"
+    negative_strategy: "place negatives on table, chair, adjacent people, objects, and background; do not mark visible child legs/feet as negative"
+  Judge_1:
+    target: "visible upper body only"
+    include: "head, hair, face, neck, shoulders, torso, arms, and hands above the table"
+    exclude: "legs, feet, lap, table, chair, other people, objects, and background"
+    positive_strategy: "place positives inside the judge's upper torso/head and visible above-table arms or hands"
+    negative_strategy: "place negatives on below-table legs/feet/lap, table edge, chair, adjacent people, objects, and background"
+  Judge_2:
+    target: "visible upper body only"
+    include: "head, hair, face, neck, shoulders, torso, arms, and hands above the table"
+    exclude: "legs, feet, lap, table, chair, other people, objects, and background"
+    positive_strategy: "place positives inside the judge's upper torso/head and visible above-table arms or hands"
+    negative_strategy: "place negatives on below-table legs/feet/lap, table edge, chair, adjacent people, objects, and background"
+  Door:
+    target: "visible door or doorway AOI"
+    include: "the door surface, doorway opening, and intended entry region"
+    exclude: "people, furniture, walls outside the AOI, and background"
+    positive_strategy: "place positives in the center and corners of the intended door AOI"
+    negative_strategy: "place negatives on nearby wall, people, and furniture"
+
 # Gaze mapping: determines radius of gaze dot
 uncertainty_radius: 0
