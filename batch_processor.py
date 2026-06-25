@@ -23,7 +23,8 @@ import yaml
 import subprocess
 import json
 import logging
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 from typing import List, Dict, Tuple, Optional
 import pandas as pd
 from datetime import datetime
@@ -35,6 +36,25 @@ from tabulate import tabulate
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+SEGMENTATION_CONFIG_KEYS = {
+    "mask_storage",
+    "compress_masks",
+    "save_masks",
+    "write_overlay_video",
+    "video_encoder",
+    "compile_image_encoder",
+    "async_loading_frames",
+    "offload_video_to_cpu",
+    "offload_state_to_cpu",
+    "frame_queue_size",
+    "result_queue_size",
+    "sam2_frame_prefetch",
+    "sam2_frame_prefetch_lookahead",
+    "sam2_frame_prefetch_retain",
+    "sam2_model_config",
+    "sam2_checkpoint",
+}
 
 
 # ============================================================================
@@ -185,6 +205,187 @@ class BatchProcessor:
             logging.error(f"Failed to parse CSV {csv_path}: {e}")
             raise
 
+    @staticmethod
+    def _expected_frame_count(start_frame: int, end_frame: int) -> int:
+        """Return inclusive frame count for metadata Start_Frame/End_Frame."""
+        count = int(end_frame) - int(start_frame) + 1
+        if count <= 0:
+            raise ValueError(f"Invalid frame range: {start_frame}-{end_frame}")
+        return count
+
+    @staticmethod
+    def _frame_file_index(path: Path) -> Optional[int]:
+        try:
+            return int(path.stem)
+        except ValueError:
+            return None
+
+    def _list_frame_files(self, frames_dir: Path) -> List[Path]:
+        if not frames_dir.exists():
+            return []
+        files = [
+            path for path in frames_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg"}
+        ]
+        return sorted(files, key=lambda path: (self._frame_file_index(path) is None, self._frame_file_index(path) or 0, path.name))
+
+    def _validate_frame_folder(self, frames_dir: Path, expected_count: int, context: str) -> bool:
+        frame_files = self._list_frame_files(frames_dir)
+        if len(frame_files) != expected_count:
+            logging.warning(
+                f"[{context}] Frame count mismatch in {frames_dir}: "
+                f"expected {expected_count}, found {len(frame_files)}"
+            )
+            return False
+
+        indexes = [self._frame_file_index(path) for path in frame_files]
+        if any(index is None for index in indexes):
+            bad = [path.name for path, index in zip(frame_files, indexes) if index is None][:10]
+            logging.warning(f"[{context}] Non-numeric frame filenames in {frames_dir}: {bad}")
+            return False
+
+        expected_indexes = set(range(expected_count))
+        actual_indexes = set(indexes)
+        missing = sorted(expected_indexes - actual_indexes)
+        unexpected = sorted(actual_indexes - expected_indexes)
+        duplicate_count = len(indexes) - len(actual_indexes)
+        if missing or unexpected or duplicate_count:
+            logging.warning(
+                f"[{context}] Frame index mismatch in {frames_dir}: "
+                f"missing={missing[:10]}, unexpected={unexpected[:10]}, duplicates={duplicate_count}"
+            )
+            return False
+
+        return True
+
+    def _clear_frame_files(self, frames_dir: Path) -> None:
+        for frame_file in self._list_frame_files(frames_dir):
+            frame_file.unlink()
+
+    def _segmentation_script(self) -> str:
+        segmentation_cfg = self.cfg.get("segmentation", {}) or {}
+        script = str(segmentation_cfg.get("script", "scripts/segment_video.py")).strip().replace("\\", "/")
+        script_path = PurePosixPath(script)
+        if (
+            not script
+            or script_path.is_absolute()
+            or ".." in script_path.parts
+            or script_path.parts[:1] != ("scripts",)
+            or script_path.suffix != ".py"
+        ):
+            raise ValueError(
+                "segmentation.script must be a relative Python script under scripts/, "
+                f"got {script!r}"
+            )
+        return script
+
+    def _segmentation_config_for_participant(self) -> Dict:
+        segmentation_cfg = self.cfg.get("segmentation", {}) or {}
+        participant_settings = {}
+        for key in SEGMENTATION_CONFIG_KEYS:
+            if key not in segmentation_cfg:
+                continue
+            value = segmentation_cfg[key]
+            if isinstance(value, str) and value.strip() == "":
+                continue
+            participant_settings[key] = value
+        return participant_settings
+
+    def _participant_output_dir(self, participant_id: str) -> Path:
+        suffix = self.cfg["frame_extraction"]["suffix"]
+        return Path(self.cfg["output"]["base_output_dir"]) / f"{participant_id}_{suffix}_output"
+
+    @staticmethod
+    def _mask_file_index(path: Path) -> Optional[int]:
+        stem = path.stem
+        if stem.startswith("frame_"):
+            stem = stem[len("frame_"):]
+        try:
+            return int(stem)
+        except ValueError:
+            return None
+
+    def _validate_segmentation_outputs(self, participant_id: str, expected_count: int) -> bool:
+        output_dir = self._participant_output_dir(participant_id)
+        masks_dir = output_dir / "masks"
+        segmentation_cfg = self.cfg.get("segmentation", {}) or {}
+        save_masks = bool(segmentation_cfg.get("save_masks", True))
+        write_overlay_video = bool(segmentation_cfg.get("write_overlay_video", True))
+        script = self._segmentation_script()
+        ok = True
+
+        logging.info(f"[VALIDATE] Checking segmentation outputs for {participant_id}")
+
+        if save_masks:
+            mask_files = sorted(
+                masks_dir.glob("frame_*.npz") if masks_dir.exists() else [],
+                key=lambda path: (self._mask_file_index(path) is None, self._mask_file_index(path) or 0, path.name),
+            )
+            if len(mask_files) != expected_count:
+                logging.error(
+                    f"[VALIDATE] Mask count mismatch for {participant_id}: "
+                    f"expected {expected_count}, found {len(mask_files)}"
+                )
+                ok = False
+            else:
+                indexes = [self._mask_file_index(path) for path in mask_files]
+                expected_indexes = set(range(expected_count))
+                actual_indexes = set(indexes)
+                missing = sorted(expected_indexes - actual_indexes)
+                unexpected = sorted(actual_indexes - expected_indexes)
+                duplicate_count = len(indexes) - len(actual_indexes)
+                if missing or unexpected or duplicate_count:
+                    logging.error(
+                        f"[VALIDATE] Mask index mismatch for {participant_id}: "
+                        f"missing={missing[:10]}, unexpected={unexpected[:10]}, duplicates={duplicate_count}"
+                    )
+                    ok = False
+                else:
+                    logging.info(f"[VALIDATE] Masks: {len(mask_files)} file(s) aligned with frames")
+
+                if mask_files:
+                    try:
+                        with zipfile.ZipFile(mask_files[0]) as npz_file:
+                            labels = sorted(
+                                Path(name).stem
+                                for name in npz_file.namelist()
+                                if name.endswith(".npy") and not Path(name).stem.startswith("__")
+                            )
+                        logging.info(f"[VALIDATE] Sample mask labels: {labels}")
+                    except Exception as exc:
+                        logging.warning(f"[VALIDATE] Could not inspect sample mask labels: {exc}")
+        else:
+            logging.info("[VALIDATE] Mask saving disabled; skipping mask count check")
+
+        output_video = output_dir / "output_video.mp4"
+        if write_overlay_video:
+            if output_video.exists() and output_video.stat().st_size > 0:
+                logging.info(f"[VALIDATE] Overlay video exists: {output_video.name}")
+            else:
+                logging.error(f"[VALIDATE] Missing overlay video for {participant_id}: {output_video}")
+                ok = False
+        else:
+            logging.info("[VALIDATE] Overlay video disabled; skipping video check")
+
+        timing_path = output_dir / "timing_report_even_faster.json"
+        if script.endswith("segment_video_even_faster.py"):
+            if timing_path.exists():
+                try:
+                    with open(timing_path, encoding="utf-8") as f:
+                        timing = json.load(f)
+                    logging.info(
+                        "[VALIDATE] Timing: "
+                        f"{timing.get('frames', '->')} frame(s), "
+                        f"{timing.get('total_seconds', '->')}s total, "
+                        f"{timing.get('end_to_end_fps', '->')} end-to-end FPS"
+                    )
+                except Exception as exc:
+                    logging.warning(f"[VALIDATE] Could not read timing report: {exc}")
+            else:
+                logging.warning(f"[VALIDATE] Timing report missing: {timing_path}")
+
+        return ok
+
     def _extract_frames(self, participant_id: str, start_frame: int, end_frame: int) -> Tuple[bool, Optional[str]]:
         """
         Extract video frames locally using FFmpeg.
@@ -203,26 +404,36 @@ class BatchProcessor:
         """
         suffix = self.cfg["frame_extraction"]["suffix"]
         frames_dir = Path(self.cfg["paths"]["local_data_dir"]) / f"{participant_id}_{suffix}_frames"
-        
-        # Check if frames already exist
-        if frames_dir.exists() and list(frames_dir.glob("*.jpg")):
-            logging.info(f"[EXTRACT] Frames already exist locally: {frames_dir.name}")
-            return True, str(frames_dir)
-        
-        # If extraction disabled and frames missing, fail gracefully
-        if not self.cfg["frame_extraction"]["enabled"] and not frames_dir.exists():
-            logging.warning(f"[EXTRACT] Frame extraction disabled and no pre-extracted frames found for {participant_id}")
+        expected_count = self._expected_frame_count(start_frame, end_frame)
+        extraction_enabled = bool(self.cfg["frame_extraction"]["enabled"])
+
+        existing_frames = self._list_frame_files(frames_dir)
+        if existing_frames:
+            if self._validate_frame_folder(frames_dir, expected_count, "EXTRACT"):
+                logging.info(f"[EXTRACT] Reusing complete frame folder: {frames_dir.name}")
+                return True, str(frames_dir)
+            if not extraction_enabled:
+                logging.error(
+                    f"[EXTRACT] Existing frame folder is incomplete and extraction is disabled: {frames_dir}"
+                )
+                return False, None
+            logging.warning(f"[EXTRACT] Removing incomplete frame files before re-extraction: {frames_dir}")
+            self._clear_frame_files(frames_dir)
+
+        if not extraction_enabled:
+            logging.warning(f"[EXTRACT] Frame extraction disabled and no complete pre-extracted frames found for {participant_id}")
             return False, None
-        
+
         logging.info(f"[EXTRACT] Participant {participant_id}: extracting frames {start_frame}-{end_frame}")
         
         # Get video source path from config
         video_path_pattern = self.cfg["frame_extraction"].get("video_path_pattern", "")
         
         if not video_path_pattern or video_path_pattern.strip() == "":
-            logging.warning(f"[EXTRACT] No video_path_pattern configured; assuming frames already extracted for {participant_id}")
-            frames_dir.mkdir(parents=True, exist_ok=True)
-            return True, str(frames_dir)
+            logging.error(
+                f"[EXTRACT] No video_path_pattern configured and no complete frame folder found for {participant_id}"
+            )
+            return False, None
         
         # Construct actual video path
         video_path = video_path_pattern.replace("{id}", participant_id)
@@ -266,8 +477,11 @@ class BatchProcessor:
             result = subprocess.run(command, capture_output=True, text=True, timeout=3600)
             
             if result.returncode == 0:
-                extracted_count = len(list(frames_dir.glob("*.jpg")))
-                logging.info(f"[EXTRACT] ✓ Successfully extracted {extracted_count} frames to {frames_dir.name}")
+                extracted_count = len(self._list_frame_files(frames_dir))
+                if not self._validate_frame_folder(frames_dir, expected_count, "EXTRACT"):
+                    logging.error(f"[EXTRACT] FFmpeg output failed validation for {participant_id}")
+                    return False, None
+                logging.info(f"[EXTRACT] Successfully extracted {extracted_count} frames to {frames_dir.name}")
                 return True, str(frames_dir)
             else:
                 logging.error(f"[EXTRACT] FFmpeg failed for {participant_id} (exit code: {result.returncode})")
@@ -288,7 +502,7 @@ class BatchProcessor:
         Generate per-participant configuration file for Docker container.
         
         This dynamically creates a config.yaml that segment_video.py will read.
-        Handles file mapping: host {id}_coordinates.json → Docker coordinates.json
+        Handles file mapping: host {id}_coordinates.json -> Docker coordinates.json
         
         Args:
             participant_id: Participant ID
@@ -302,17 +516,16 @@ class BatchProcessor:
         try:
             suffix = self.cfg["frame_extraction"]["suffix"]
             
-            # Count actual frames in directory for validation
-            frame_files = list(Path(frames_dir).glob("*.jpg")) + list(Path(frames_dir).glob("*.jpeg"))
-            if not frame_files:
-                logging.warning(f"[CONFIG] Warning: No frame files found in {frames_dir}")
-            
+            expected_count = self._expected_frame_count(start_frame, end_frame)
+            if not self._validate_frame_folder(Path(frames_dir), expected_count, "CONFIG"):
+                raise ValueError(f"Frame folder failed validation: {frames_dir}")
+
             # Generate per-participant configuration
             participant_cfg = {
                 "participant_id": int(participant_id),
                 "fps": self.cfg["defaults"]["fps"],
                 "start_frame": 0,  # Frames already extracted, relative indexing
-                "end_frame": len(frame_files) - 1 if frame_files else end_frame - start_frame,
+                "end_frame": expected_count - 1,
                 
                 # Docker paths (IMPORTANT: must match VOLUME in Dockerfile)
                 "local_data_dir": self.cfg["paths"]["local_data_dir"],
@@ -331,6 +544,7 @@ class BatchProcessor:
                 # Gaze mapping
                 "uncertainty_radius": self.cfg["gaze_mapping"]["uncertainty_radius"]
             }
+            participant_cfg.update(self._segmentation_config_for_participant())
             
             # Write participant config
             config_file = self.configs_dir / f"participant_{participant_id}.yaml"
@@ -381,10 +595,9 @@ class BatchProcessor:
             success: True if Docker container executed successfully
         """
         try:
-            suffix = self.cfg["frame_extraction"]["suffix"]
-            local_data_dir = self.cfg["paths"]["local_data_dir"]
             docker_data_dir = self.cfg["paths"]["docker_data_dir"]
-            output_dir = Path(self.cfg["output"]["base_output_dir"]) / f"{participant_id}_{suffix}_output"
+            output_dir = self._participant_output_dir(participant_id)
+            segmentation_script = self._segmentation_script()
             
             # Create output directory
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -409,7 +622,7 @@ class BatchProcessor:
                 
                 # Image and command
                 self.cfg["docker"]["image_name"],
-                "python", "scripts/segment_video.py", participant_id
+                "python", segmentation_script, participant_id
             ]
             
             logging.info(f"[DOCKER] Launching container for {participant_id}")
@@ -495,6 +708,13 @@ class BatchProcessor:
             )
             
             if docker_ok:
+                expected_count = self._expected_frame_count(start_frame, end_frame)
+                outputs_ok = self._validate_segmentation_outputs(participant_id, expected_count)
+                if not outputs_ok:
+                    logging.error(f"[FAIL] Segmentation output validation failed for {participant_id}")
+                    self.results["failed"].append((participant_id, "Segmentation output validation failed"))
+                    return False
+
                 logging.info(f"[SUCCESS]  Participant {participant_id} completed")
                 self.results["successful"].append(participant_id)
                 return True
@@ -567,7 +787,7 @@ class BatchProcessor:
         
         # Skipped participants
         for pid in self.results["skipped"]:
-            summary_data.append([pid, "⊘ SKIPPED", "Not in metadata"])
+            summary_data.append([pid, "SKIPPED", "Not in metadata"])
         
         # Print table
         headers = ["Participant ID", "Status", "Details"]

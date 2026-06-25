@@ -16,9 +16,9 @@
 #   1. Reads this batch_config.yaml and extracts frame ranges from CSV metadata
 #   2. For each participant ID, generates a per-participant config.yaml
 #   3. Extracts frames locally to {id}_{suffix}_frames/ folder
-#   4. Dynamically renames prompt files ({id}_coordinates.json → coordinates.json in container)
+#   4. Dynamically renames prompt files ({id}_coordinates.json -> coordinates.json in container)
 #   5. Launches Docker container with proper volume mounts
-#   6. segment_video.py inside Docker reads the generated config and processes seamlessly
+#   6. The configured segmentation script inside Docker reads the generated config and processes seamlessly
 #   7. Reports success/failure for each ID with full logging
 #
 # How to use:
@@ -69,7 +69,7 @@ batch:
 # -------- FRAME EXTRACTION SETTINGS --------
 # Controls how video frames are prepared locally before Docker segmentation
 frame_extraction:
-  # Enable frame extraction? (false if frames already exist on disk)
+  # Enable frame extraction-> (false if frames already exist on disk)
   enabled: true
   
   # Path to CSV metadata file containing start/stop frame indices for each participant
@@ -110,6 +110,42 @@ docker:
   # Options: "all" (all GPUs), "0" (GPU 0 only), "0,1" (GPUs 0 and 1)
   # Recommendation: use "all" for maximum throughput
   gpus: "all"
+
+# -------- SAM2 SEGMENTATION RUNNER --------
+# Controls which script Docker runs and which speed/output options are passed
+# into each generated participant config.
+segmentation:
+  # Use the optimized runner by default. Keep the original script available for
+  # reproducibility by setting this to "scripts/segment_video.py".
+  script: "scripts/segment_video_even_faster.py"
+
+  # Mask output format:
+  #   packbits        = fast native NumPy bit-packing, about 8x smaller than raw bool
+  #   bool            = fastest writes, largest files
+  #   compressed_bool = legacy np.savez_compressed output, smaller but much slower
+  mask_storage: "packbits"
+  save_masks: true
+
+  # Overlay video output. Set false for maximum throughput when masks are enough.
+  write_overlay_video: true
+  video_encoder: "auto"  # auto, ffmpeg_nvenc, opencv
+
+  # SAM2/runtime speed settings consumed by segment_video_even_faster.py.
+  compile_image_encoder: true
+  async_loading_frames: true
+  offload_video_to_cpu: true
+  offload_state_to_cpu: false
+  frame_queue_size: 24
+  result_queue_size: 24
+  sam2_frame_prefetch: true
+  sam2_frame_prefetch_lookahead: 24
+  sam2_frame_prefetch_retain: 2
+
+  # Optional explicit model paths. Leave blank to use the script defaults.
+  # Only change these if the checkpoint is present inside the Docker image or
+  # mounted into the container.
+  sam2_model_config: ""
+  sam2_checkpoint: ""
 
 # -------- SEGMENTATION DEFAULTS --------
 # Default parameters applied to all participants (can be overridden per-participant if needed)
@@ -183,7 +219,7 @@ prompts:
   
   # Name expected INSIDE the Docker container
   # segment_video.py specifically looks for this filename in /data/
-  # batch_processor handles the mapping: {id}_coordinates.json (host) → coordinates.json (Docker)
+  # batch_processor handles the mapping: {id}_coordinates.json (host) -> coordinates.json (Docker)
   docker_filename: "coordinates.json"
 
 # -------- OUTPUT & RESOURCE MANAGEMENT --------
