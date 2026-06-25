@@ -72,6 +72,7 @@ PROMPTS_ELEM_ID = "prompts-bridge"
 ACTIVE_LABEL_ELEM_ID = "active-label-bridge"
 STATUS_ELEM_ID = "canvas-status-display"
 COUNT_ELEM_ID = "canvas-prompt-count"
+SAVE_MARKER_ELEM_ID = "save-marker-bridge"
 
 
 def image_to_data_uri(image: Image.Image) -> str:
@@ -144,6 +145,38 @@ def prompt_count_text(prompt_json: str, frame_idx: int) -> str:
         f"Total: {total} prompts ({total_points} points, {total_boxes} boxes)"
     )
 
+
+def labels_from_text(labels_text: str) -> List[str]:
+    return [label.strip() for label in str(labels_text or "").split(',') if label.strip()]
+
+
+def prompt_qa_text(prompt_json: str, labels_text: str = "") -> str:
+    dots_by_frame = prompts_from_json(prompt_json)
+    labels = labels_from_text(labels_text)
+    frames_with_prompts = 0
+    total_points = 0
+    total_boxes = 0
+    labels_seen = set()
+
+    for coords in dots_by_frame.values():
+        if coords:
+            frames_with_prompts += 1
+        points, boxes = count_prompt_types(coords)
+        total_points += points
+        total_boxes += boxes
+        for coord in coords or []:
+            if isinstance(coord, dict) and coord.get("label"):
+                labels_seen.add(str(coord["label"]))
+
+    labels_without_prompts = [label for label in labels if label not in labels_seen]
+    missing_text = ", ".join(labels_without_prompts) if labels_without_prompts else "none"
+    used_text = ", ".join(sorted(labels_seen)) if labels_seen else "none"
+    return (
+        f"Prompt QA: {frames_with_prompts} frame(s) with prompts; "
+        f"{total_points} point(s), {total_boxes} box(es).\n"
+        f"Labels used: {used_text}.\n"
+        f"Configured labels with no prompts: {missing_text}."
+    )
 
 def empty_frame_payload(message: str) -> str:
     return json.dumps({"ok": False, "message": message}, separators=(",", ":"))
@@ -347,12 +380,12 @@ CANVAS_CSS = r"""
 
 CANVAS_JS = r"""
 () => {
-  const SCRIPT_VERSION = "canvas-interactions-2026-06-24-2";
+  const SCRIPT_VERSION = "canvas-interactions-2026-06-25-1";
   if (window.__sam2CanvasTimer) clearInterval(window.__sam2CanvasTimer);
   window.__sam2CanvasInstalled = SCRIPT_VERSION;
 
-  const state = { payload: null, prompts: {}, mode: "positive", drag: null,
-    selectedLabel: "", lastPayloadValue: null, lastPromptValue: null };
+  const state = { payload: null, prompts: {}, mode: "positive", drag: null, dirty: false,
+    selectedLabel: "", lastPayloadValue: null, lastPromptValue: null, lastSaveMarkerValue: null };
 
   function byId(id) { return document.getElementById(id); }
   function canvasRoots() {
@@ -403,6 +436,7 @@ CANVAS_JS = r"""
   function writePrompts() {
     const text = JSON.stringify(state.prompts || {});
     state.lastPromptValue = text;
+    state.dirty = true;
     nativeSet(componentInput("prompts-bridge"), text);
     updateCount();
   }
@@ -646,11 +680,18 @@ CANVAS_JS = r"""
     const promptsInput = componentInput("prompts-bridge");
     if (promptsInput && promptsInput.value !== state.lastPromptValue) {
       state.lastPromptValue = promptsInput.value;
+      state.dirty = false;
       try {
         const parsed = JSON.parse(promptsInput.value || "{}");
         state.prompts = parsed && typeof parsed === "object" ? parsed : {};
       } catch (_) { state.prompts = {}; }
       state.drag = null; render();
+    }
+    const saveMarker = componentInput("save-marker-bridge");
+    if (saveMarker && saveMarker.value !== state.lastSaveMarkerValue) {
+      state.lastSaveMarkerValue = saveMarker.value;
+      state.dirty = false;
+      updateCount();
     }
     activeLabel();
   }
@@ -684,6 +725,13 @@ CANVAS_JS = r"""
       undoBtn.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); undoLastPrompt(); }, true);
     }
   }
+  window.onbeforeunload = (event) => {
+    if (!state.dirty) return undefined;
+    event.preventDefault();
+    event.returnValue = "";
+    return "";
+  };
+
   document.addEventListener("keydown", (event) => {
     const tag = event.target && event.target.tagName;
     if (["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(tag)) return;
@@ -725,6 +773,12 @@ def create_interface():
             elem_id=ACTIVE_LABEL_ELEM_ID,
             elem_classes=["bridge-hidden"],
             label="Active Label Bridge",
+        )
+        save_marker_bridge = gr.Textbox(
+            value="0",
+            elem_id=SAVE_MARKER_ELEM_ID,
+            elem_classes=["bridge-hidden"],
+            label="Save Marker Bridge",
         )
 
         with gr.Row():
@@ -804,6 +858,12 @@ def create_interface():
                         interactive=False,
                         elem_id=COUNT_ELEM_ID,
                     )
+                    prompt_qa_summary = gr.Textbox(
+                        value="Prompt QA: No prompts loaded.",
+                        label="Prompt QA",
+                        interactive=False,
+                        lines=3,
+                    )
 
                 with gr.Group():
                     gr.Markdown("### 3. Save Coordinates")
@@ -854,7 +914,7 @@ def create_interface():
             outputs=[participant_dropdown, output_path_input, auto_prompt_path_state],
         )
 
-        def on_load_click(project_name, participant_id, manual_path, output_path, auto_prompt_path, ignore_existing_prompts=False):
+        def on_load_click(project_name, participant_id, manual_path, output_path, auto_prompt_path, labels_text, ignore_existing_prompts=False):
             selected_prompt_path, next_auto_path = resolve_prompt_path(
                 project_name, participant_id, manual_path, output_path, auto_prompt_path
             )
@@ -865,7 +925,7 @@ def create_interface():
                     message = "Status: Error - Select project/participant or enter manual path"
                     return (
                         canvas_html(empty_frame_payload(message)), empty_frame_payload(message), "{}", gr.update(minimum=0, value=0, maximum=1, interactive=False),
-                        message, 0, [], "", selected_prompt_path, next_auto_path, "0 prompts"
+                        message, 0, [], "", selected_prompt_path, next_auto_path, "0 prompts", "Prompt QA: No prompts loaded."
                     )
                 frames_path = get_frames_path(project_name, participant_id)
 
@@ -873,7 +933,7 @@ def create_interface():
                 message = "Status: Error - Frames path not found"
                 return (
                     canvas_html(empty_frame_payload(message)), empty_frame_payload(message), "{}", gr.update(minimum=0, value=0, maximum=1, interactive=False),
-                    message, 0, [], "", selected_prompt_path, next_auto_path, "0 prompts"
+                    message, 0, [], "", selected_prompt_path, next_auto_path, "0 prompts", "Prompt QA: No prompts loaded."
                 )
 
             frames = get_frames_list(frames_path)
@@ -881,7 +941,7 @@ def create_interface():
                 message = "Status: Error - No frames found in directory"
                 return (
                     canvas_html(empty_frame_payload(message)), empty_frame_payload(message), "{}", gr.update(minimum=0, value=0, maximum=1, interactive=False),
-                    message, 0, [], "", selected_prompt_path, next_auto_path, "0 prompts"
+                    message, 0, [], "", selected_prompt_path, next_auto_path, "0 prompts", "Prompt QA: No prompts loaded."
                 )
 
             if ignore_existing_prompts:
@@ -912,6 +972,7 @@ def create_interface():
                 selected_prompt_path,
                 next_auto_path,
                 count,
+                prompt_qa_text(prompt_json, labels_text),
             )
 
         load_outputs = [
@@ -926,18 +987,19 @@ def create_interface():
             output_path_input,
             auto_prompt_path_state,
             coord_count,
+            prompt_qa_summary,
         ]
 
         load_btn.click(
             on_load_click,
-            inputs=[project_dropdown, participant_dropdown, manual_frames_input, output_path_input, auto_prompt_path_state],
+            inputs=[project_dropdown, participant_dropdown, manual_frames_input, output_path_input, auto_prompt_path_state, labels_input],
             outputs=load_outputs,
         )
         load_empty_btn.click(
-            lambda project_name, participant_id, manual_path, output_path, auto_prompt_path: on_load_click(
-                project_name, participant_id, manual_path, output_path, auto_prompt_path, ignore_existing_prompts=True
+            lambda project_name, participant_id, manual_path, output_path, auto_prompt_path, labels_text: on_load_click(
+                project_name, participant_id, manual_path, output_path, auto_prompt_path, labels_text, ignore_existing_prompts=True
             ),
-            inputs=[project_dropdown, participant_dropdown, manual_frames_input, output_path_input, auto_prompt_path_state],
+            inputs=[project_dropdown, participant_dropdown, manual_frames_input, output_path_input, auto_prompt_path_state, labels_input],
             outputs=load_outputs,
         )
 
@@ -1001,16 +1063,34 @@ def create_interface():
             outputs=[active_label_bridge],
         )
 
-        def save_coords_handler(prompt_json, output_path, project_name, participant_id):
+        def save_coords_handler(prompt_json, output_path, project_name, participant_id, labels_text):
             if (not project_name or not participant_id) and (not output_path or not output_path.strip()):
-                return "Status: Error - Select project/participant, or specify an output path."
+                return (
+                    "Status: Error - Select project/participant, or specify an output path.",
+                    gr.update(),
+                    prompt_qa_text(prompt_json, labels_text),
+                )
             dots_by_frame = prompts_from_json(prompt_json)
-            return save_coordinates(dots_by_frame, output_path, project_name, participant_id)
+            status = save_coordinates(dots_by_frame, output_path, project_name, participant_id)
+            return status, str(time.time()), prompt_qa_text(prompt_json, labels_text)
 
         save_btn.click(
             save_coords_handler,
-            inputs=[prompts_bridge, output_path_input, project_dropdown, participant_dropdown],
-            outputs=status_display,
+            inputs=[prompts_bridge, output_path_input, project_dropdown, participant_dropdown, labels_input],
+            outputs=[status_display, save_marker_bridge, prompt_qa_summary],
+        )
+
+        prompts_bridge.change(
+            prompt_qa_text,
+            inputs=[prompts_bridge, labels_input],
+            outputs=prompt_qa_summary,
+            **supported_event_kwargs(prompts_bridge.change, show_progress="hidden"),
+        )
+        labels_input.change(
+            prompt_qa_text,
+            inputs=[prompts_bridge, labels_input],
+            outputs=prompt_qa_summary,
+            **supported_event_kwargs(labels_input.change, show_progress="hidden"),
         )
 
     return interface
