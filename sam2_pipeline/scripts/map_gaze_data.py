@@ -30,6 +30,39 @@ MASK_COLORS = [
     (255, 255, 0),  # cyan
 ]
 
+MASK_METADATA_PREFIX = "__"
+
+
+def _npz_scalar_to_str(value):
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
+
+
+def load_masks(mask_path):
+    with np.load(mask_path) as masks_data:
+        keys = [key for key in masks_data.files if not key.startswith(MASK_METADATA_PREFIX)]
+        storage = "bool"
+        if "__mask_storage__" in masks_data.files:
+            storage = _npz_scalar_to_str(masks_data["__mask_storage__"])
+
+        if storage == "packbits":
+            height = int(masks_data["__height__"])
+            width = int(masks_data["__width__"])
+            bitorder = _npz_scalar_to_str(masks_data.get("__bitorder__", "little"))
+            count = height * width
+            return {
+                key: np.unpackbits(masks_data[key], bitorder=bitorder, count=count)
+                .reshape(height, width)
+                .astype(bool)
+                for key in keys
+            }
+
+        return {key: masks_data[key] for key in keys}
+
+
 def map_gaze_data(base_dir, frames_dir, gaze_path, masks_dir, start_frame, end_frame, id, fps, uncertainty_radius=0):
     out_dir = os.path.join(base_dir, f"{id}")
     os.makedirs(out_dir, exist_ok=True)
@@ -78,7 +111,8 @@ def map_gaze_data(base_dir, frames_dir, gaze_path, masks_dir, start_frame, end_f
 
         frame = cv2.imread(os.path.join(frames_dir, frame_names[i]))
         mask_path = masks_dict[i]
-        add_masks_to_frame(frame, mask_path)
+        masks_data = load_masks(mask_path)
+        add_masks_to_frame(frame, masks_data)
 
         if len(gaze_data) == 0:
             roi = "none"
@@ -94,7 +128,7 @@ def map_gaze_data(base_dir, frames_dir, gaze_path, masks_dir, start_frame, end_f
                 else:
                     cv2.circle(frame, (x_eye, y_eye), radius=4, color=(0, 255, 0), thickness=-1)
                     cv2.circle(frame, (x_eye, y_eye), radius=uncertainty_radius, color=(0, 255, 0), thickness=2)
-                    roi = check_intersection(mask_path, x_eye, y_eye, uncertainty_radius)
+                    roi = check_intersection(masks_data, x_eye, y_eye, uncertainty_radius)
 
         cv2.putText(frame, f"Intersecting: {roi}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
@@ -125,8 +159,7 @@ def map_gaze_data(base_dir, frames_dir, gaze_path, masks_dir, start_frame, end_f
     expanded_csv_file.close()
 
 
-def check_intersection(mask_path, x_eye, y_eye, radius):
-    masks_data = np.load(mask_path)
+def check_intersection(masks_data, x_eye, y_eye, radius):
 
     for key in masks_data.keys():
         mask = masks_data[key]
@@ -157,8 +190,7 @@ def check_intersection(mask_path, x_eye, y_eye, radius):
     return "none"
 
 
-def add_masks_to_frame(frame, mask_path):
-    masks_data = np.load(mask_path)
+def add_masks_to_frame(frame, masks_data):
     overlay = frame.copy()
 
     for i, key in enumerate(masks_data.keys()):
