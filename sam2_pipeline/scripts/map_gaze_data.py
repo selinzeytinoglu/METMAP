@@ -1,33 +1,35 @@
-'''
-This program takes
-1.) Extracted video frames directory
-2.) Start and end frames for the video
-3.) gaze_positions.csv
-4.) sam2 ROI masks
-as inputs and processes the video frame by frame to see if the persons gaze (retrieved from gaze_positions.csv)
-intersects with the masks for the ROI's that were generated using sam2.
+"""
+Map gaze coordinates to SAM2 ROI masks.
 
-The output is a fixations.csv which contains where the script determines someone is looking for every frame
-and an output video that displays the gaze and masks for visual inspection.
-'''
+Inputs:
+1. Extracted video frames directory
+2. Start and end frames for the video
+3. gaze_positions.csv
+4. SAM2 ROI masks
 
+Outputs:
+- fixations.csv with frame ranges for inferred gaze targets
+- fixations_expanded.csv with one row per processed frame
+- output video with gaze and mask overlays for visual inspection
+"""
+
+import csv
 import math
 import os
-import yaml
-import cv2
-import pandas as pd
-from tqdm import tqdm
-import csv
-import numpy as np
 
-# Color palette for mask overlays (BGR format for OpenCV)
+import cv2
+import numpy as np
+import pandas as pd
+import yaml
+from tqdm import tqdm
+
 MASK_COLORS = [
-    (255, 0, 0),    # blue
-    (0, 255, 255),  # yellow
-    (0, 0, 255),    # red
-    (255, 0, 255),  # magenta
-    (0, 255, 0),    # green
-    (255, 255, 0),  # cyan
+    (255, 0, 0),
+    (0, 255, 255),
+    (0, 0, 255),
+    (255, 0, 255),
+    (0, 255, 0),
+    (255, 255, 0),
 ]
 
 MASK_METADATA_PREFIX = "__"
@@ -39,6 +41,59 @@ def _npz_scalar_to_str(value):
     if isinstance(value, bytes):
         return value.decode("utf-8")
     return str(value)
+
+
+def _expected_frame_count(start_frame, end_frame):
+    count = int(end_frame) - int(start_frame) + 1
+    if count <= 0:
+        raise ValueError(f"Invalid frame range: {start_frame}-{end_frame}")
+    return count
+
+
+def _parse_relative_frame_index(filename):
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    if stem.startswith("frame_"):
+        stem = stem[len("frame_"):]
+    try:
+        return int(stem)
+    except ValueError as exc:
+        raise ValueError(f"Cannot parse frame index from filename: {filename}") from exc
+
+
+def _indexed_files(folder, suffixes):
+    suffixes = {suffix.lower() for suffix in suffixes}
+    indexed = {}
+    for filename in os.listdir(folder):
+        if os.path.splitext(filename)[1].lower() not in suffixes:
+            continue
+        index = _parse_relative_frame_index(filename)
+        if index in indexed:
+            raise ValueError(
+                f"Duplicate relative frame index {index} in {folder}: "
+                f"{indexed[index]} and {filename}"
+            )
+        indexed[index] = filename
+    return indexed
+
+
+def _validate_aligned_inputs(frames_dir, masks_dir, frame_count):
+    frame_files = _indexed_files(frames_dir, {".jpg", ".jpeg"})
+    mask_files = _indexed_files(masks_dir, {".npz"})
+    expected = set(range(frame_count))
+
+    missing_frames = sorted(expected - set(frame_files))
+    missing_masks = sorted(expected - set(mask_files))
+    if missing_frames or missing_masks:
+        raise ValueError(
+            "Frame/mask alignment failed: "
+            f"missing_frames={missing_frames[:10]}, missing_masks={missing_masks[:10]}, "
+            f"expected_count={frame_count}, frame_files={len(frame_files)}, mask_files={len(mask_files)}"
+        )
+
+    return (
+        [frame_files[index] for index in range(frame_count)],
+        [os.path.join(masks_dir, mask_files[index]) for index in range(frame_count)],
+    )
 
 
 def load_masks(mask_path):
@@ -68,95 +123,106 @@ def map_gaze_data(base_dir, frames_dir, gaze_path, masks_dir, start_frame, end_f
     os.makedirs(out_dir, exist_ok=True)
     out_video_path = os.path.join(out_dir, f"{id}_output.avi")
 
-    # Get video dimensions from first frame image
-    frame_names = [f for f in os.listdir(frames_dir) if f.lower().endswith('.jpg')]
-    frame_names.sort(key=lambda x: int(os.path.splitext(x)[0]))
+    frame_count = _expected_frame_count(start_frame, end_frame)
+    frame_names, mask_paths = _validate_aligned_inputs(frames_dir, masks_dir, frame_count)
+
     first_frame_img = cv2.imread(os.path.join(frames_dir, frame_names[0]))
+    if first_frame_img is None:
+        raise RuntimeError(f"Failed to read first frame: {os.path.join(frames_dir, frame_names[0])}")
     height, width = first_frame_img.shape[:2]
 
     fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
     out_video = cv2.VideoWriter(out_video_path, fourcc, fps, (width, height))
+    if not out_video.isOpened():
+        raise RuntimeError(f"Failed to open output video writer: {out_video_path}")
 
-    # Load gaze data
     frames = pd.read_csv(gaze_path)
-
-    # Setup fixations
     prev_fixation = None
     fixation_duration = 0
+    fixation_start_frame = None
 
     output_csv_path = os.path.join(out_dir, f"{id}_fixations.csv")
-    csv_file = open(output_csv_path, 'w', newline='')
-    writer = csv.writer(csv_file)
-    writer.writerow(["name", "frame duration", "start frame", "end frame", "duration (s)", "start (s)", "end (s)"])
-
     expanded_csv_path = os.path.join(out_dir, f"{id}_fixations_expanded.csv")
-    expanded_csv_file = open(expanded_csv_path, 'w', newline='')
-    expanded_writer = csv.writer(expanded_csv_file)
-    expanded_writer.writerow(["framenum", "code"])
 
-    pbar = tqdm(total=end_frame-start_frame, desc="Processing frames", unit="frame")
+    try:
+        with open(output_csv_path, 'w', newline='') as csv_file, open(expanded_csv_path, 'w', newline='') as expanded_csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(["name", "frame duration", "start frame", "end frame", "duration (s)", "start (s)", "end (s)"])
 
-    masks_dict = {}
-    mask_files = os.listdir(masks_dir)
-    mask_files.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
-    for i, file in enumerate(mask_files):
-        masks_dict[i] = os.path.join(masks_dir, file)
+            expanded_writer = csv.writer(expanded_csv_file)
+            expanded_writer.writerow(["framenum", "code"])
 
-    # Main loop that goes through every frame
-    for i in range(end_frame - start_frame):
-        pbar.update(1)
+            with tqdm(total=frame_count, desc="Processing frames", unit="frame") as pbar:
+                for i in range(frame_count):
+                    pbar.update(1)
 
-        frame_num = i + start_frame
-        gaze_data = frames[frames.world_index == frame_num].iloc[:, 3:5].values
+                    frame_num = i + int(start_frame)
+                    gaze_data = frames[frames.world_index == frame_num].iloc[:, 3:5].values
 
-        frame = cv2.imread(os.path.join(frames_dir, frame_names[i]))
-        mask_path = masks_dict[i]
-        masks_data = load_masks(mask_path)
-        add_masks_to_frame(frame, masks_data)
+                    frame_path = os.path.join(frames_dir, frame_names[i])
+                    frame = cv2.imread(frame_path)
+                    if frame is None:
+                        raise RuntimeError(f"Failed to read frame: {frame_path}")
 
-        if len(gaze_data) == 0:
-            roi = "none"
-        else:
-            x_norm, y_norm = gaze_data[0].item(0), gaze_data[0].item(1)
-            if math.isnan(x_norm) or math.isnan(y_norm):
-                roi = "none"
-            else:
-                x_eye = int(x_norm * width)
-                y_eye = int((1 - y_norm) * height)
-                if x_eye < 0 or x_eye >= width or y_eye < 0 or y_eye >= height:
-                    roi = "none"
-                else:
-                    cv2.circle(frame, (x_eye, y_eye), radius=4, color=(0, 255, 0), thickness=-1)
-                    cv2.circle(frame, (x_eye, y_eye), radius=uncertainty_radius, color=(0, 255, 0), thickness=2)
-                    roi = check_intersection(masks_data, x_eye, y_eye, uncertainty_radius)
+                    masks_data = load_masks(mask_paths[i])
+                    add_masks_to_frame(frame, masks_data)
 
-        cv2.putText(frame, f"Intersecting: {roi}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    if len(gaze_data) == 0:
+                        roi = "none"
+                    else:
+                        x_norm, y_norm = gaze_data[0].item(0), gaze_data[0].item(1)
+                        if math.isnan(x_norm) or math.isnan(y_norm):
+                            roi = "none"
+                        else:
+                            x_eye = int(x_norm * width)
+                            y_eye = int((1 - y_norm) * height)
+                            if x_eye < 0 or x_eye >= width or y_eye < 0 or y_eye >= height:
+                                roi = "none"
+                            else:
+                                cv2.circle(frame, (x_eye, y_eye), radius=4, color=(0, 255, 0), thickness=-1)
+                                cv2.circle(frame, (x_eye, y_eye), radius=uncertainty_radius, color=(0, 255, 0), thickness=2)
+                                roi = check_intersection(masks_data, x_eye, y_eye, uncertainty_radius)
 
-        current_fixation = roi
-        if current_fixation == prev_fixation:
-            fixation_duration += 1
-        else:
-            start_fixation_frame = int(frame_num - fixation_duration)
-            end_fixation_frame = int(frame_num)
-            if fixation_duration != 0:
-                writer.writerow([prev_fixation, int(fixation_duration), start_fixation_frame, end_fixation_frame,
-                                round(fixation_duration / fps, 2), round(start_fixation_frame / fps, 2), round(end_fixation_frame / fps, 2)])
-            fixation_duration = 1
-            prev_fixation = current_fixation
+                    cv2.putText(frame, f"Intersecting: {roi}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-        expanded_writer.writerow([i+1, roi])
-        out_video.write(frame)
+                    current_fixation = roi
+                    if prev_fixation is None:
+                        prev_fixation = current_fixation
+                        fixation_duration = 1
+                        fixation_start_frame = frame_num
+                    elif current_fixation == prev_fixation:
+                        fixation_duration += 1
+                    else:
+                        end_fixation_frame = frame_num - 1
+                        writer.writerow([
+                            prev_fixation,
+                            int(fixation_duration),
+                            int(fixation_start_frame),
+                            int(end_fixation_frame),
+                            round(fixation_duration / fps, 2),
+                            round(fixation_start_frame / fps, 2),
+                            round(end_fixation_frame / fps, 2),
+                        ])
+                        prev_fixation = current_fixation
+                        fixation_duration = 1
+                        fixation_start_frame = frame_num
 
-    # Write the last fixation
-    start_fixation_frame = int(frame_num - fixation_duration)
-    end_fixation_frame = int(frame_num)
-    if fixation_duration != 0:
-        writer.writerow([prev_fixation, int(fixation_duration), start_fixation_frame, end_fixation_frame,
-                        round(fixation_duration / fps, 2), round(start_fixation_frame / fps, 2), round(end_fixation_frame / fps, 2)])
+                    expanded_writer.writerow([frame_num, roi])
+                    out_video.write(frame)
 
-    out_video.release()
-    csv_file.close()
-    expanded_csv_file.close()
+            if prev_fixation is not None:
+                end_fixation_frame = int(fixation_start_frame + fixation_duration - 1)
+                writer.writerow([
+                    prev_fixation,
+                    int(fixation_duration),
+                    int(fixation_start_frame),
+                    int(end_fixation_frame),
+                    round(fixation_duration / fps, 2),
+                    round(fixation_start_frame / fps, 2),
+                    round(end_fixation_frame / fps, 2),
+                ])
+    finally:
+        out_video.release()
 
 
 def check_intersection(masks_data, x_eye, y_eye, radius):
