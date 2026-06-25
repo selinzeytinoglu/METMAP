@@ -426,11 +426,22 @@ class FFmpegNvencVideoSink:
         if self.proc.poll() is not None:
             stderr = self.proc.stderr.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"FFmpeg exited early while writing video: {stderr}")
-        self.proc.stdin.write(frame_bgr.tobytes())
+        try:
+            self.proc.stdin.write(frame_bgr.tobytes())
+        except (BrokenPipeError, OSError) as exc:
+            stderr = ""
+            if self.proc.poll() is not None:
+                stderr = self.proc.stderr.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"FFmpeg pipe failed while writing video: {stderr}"
+            ) from exc
 
     def close(self):
         if self.proc.stdin:
-            self.proc.stdin.close()
+            try:
+                self.proc.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
         stderr = self.proc.stderr.read().decode("utf-8", errors="replace")
         return_code = self.proc.wait()
         if return_code != 0:
@@ -621,6 +632,74 @@ def io_consumer_thread(
                 error_holder.append(exc)
 
 
+def raise_if_io_worker_failed(io_errors, io_thread):
+    if io_errors:
+        raise RuntimeError("I/O worker failed") from io_errors[0]
+    if not io_thread.is_alive():
+        raise RuntimeError(
+            "I/O worker stopped before accepting all propagated frames."
+        )
+
+
+def enqueue_io_task(
+    task_queue,
+    task,
+    io_errors,
+    io_thread,
+    max_wait_seconds,
+):
+    frame_idx = task[0] if task else "unknown"
+    max_wait_seconds = max(0.1, float(max_wait_seconds))
+    deadline = perf_counter() + max_wait_seconds
+
+    while True:
+        raise_if_io_worker_failed(io_errors, io_thread)
+        remaining = deadline - perf_counter()
+        if remaining <= 0:
+            raise TimeoutError(
+                "I/O worker did not accept "
+                f"frame {frame_idx} within {max_wait_seconds:.1f}s. "
+                "The output queue may be blocked by video encoding or disk writes."
+            )
+
+        try:
+            task_queue.put(task, timeout=min(0.5, remaining))
+            return
+        except queue.Full:
+            continue
+
+
+def stop_io_worker(task_queue, io_thread, io_errors, max_wait_seconds):
+    max_wait_seconds = max(0.1, float(max_wait_seconds))
+    deadline = perf_counter() + max_wait_seconds
+    sentinel_sent = False
+
+    while io_thread.is_alive() and not sentinel_sent:
+        remaining = deadline - perf_counter()
+        if remaining <= 0:
+            return TimeoutError(
+                f"I/O worker did not accept shutdown within {max_wait_seconds:.1f}s."
+            )
+
+        try:
+            task_queue.put(None, timeout=min(0.5, remaining))
+            sentinel_sent = True
+        except queue.Full:
+            if io_errors and not io_thread.is_alive():
+                break
+            continue
+
+    if io_thread.is_alive():
+        io_thread.join(timeout=max(0.1, deadline - perf_counter()))
+
+    if io_thread.is_alive():
+        return TimeoutError(
+            f"I/O worker did not stop within {max_wait_seconds:.1f}s."
+        )
+
+    return None
+
+
 def main():
     config_path = sys.argv[1] if len(sys.argv) > 1 else "/config/config.yaml"
     if not os.path.exists(config_path):
@@ -669,6 +748,12 @@ def main():
     video_encoder = cfg_get(cfg, "video_encoder", "auto")
     frame_queue_size = int(cfg_get(cfg, "frame_queue_size", 24))
     result_queue_size = int(cfg_get(cfg, "result_queue_size", 24))
+    io_queue_put_timeout_seconds = float(
+        cfg_get(cfg, "io_queue_put_timeout_seconds", 60.0)
+    )
+    io_thread_stop_timeout_seconds = float(
+        cfg_get(cfg, "io_thread_stop_timeout_seconds", 300.0)
+    )
     sam2_prefetch_enabled = bool(cfg_get(cfg, "sam2_frame_prefetch", True))
     sam2_prefetch_lookahead = int(cfg_get(cfg, "sam2_frame_prefetch_lookahead", 24))
     sam2_prefetch_retain = int(cfg_get(cfg, "sam2_frame_prefetch_retain", 2))
@@ -747,21 +832,34 @@ def main():
         print("[INFO] Starting video propagation...")
         propagation_start = perf_counter()
         frame_count = 0
+        io_stop_error = None
         try:
             for idx, obj_ids, logits in predictor.propagate_in_video(inference_state):
                 masks_cpu = (logits > 0.0).cpu().numpy()
                 frame_bgr = frame_prefetcher.get(idx)
-                task_queue.put((idx, obj_ids, masks_cpu, frame_bgr))
+                enqueue_io_task(
+                    task_queue,
+                    (idx, obj_ids, masks_cpu, frame_bgr),
+                    io_errors,
+                    io_thread,
+                    io_queue_put_timeout_seconds,
+                )
                 sam2_prefetcher.mark_consumed(idx)
                 frame_count += 1
         finally:
-            task_queue.put(None)
-            io_thread.join()
+            io_stop_error = stop_io_worker(
+                task_queue,
+                io_thread,
+                io_errors,
+                io_thread_stop_timeout_seconds,
+            )
             sam2_prefetcher.stop()
             frame_prefetcher.join()
 
         if io_errors:
             raise RuntimeError("I/O worker failed") from io_errors[0]
+        if io_stop_error is not None:
+            raise io_stop_error
 
     propagation_seconds = perf_counter() - propagation_start
     total_seconds = perf_counter() - total_start
@@ -789,6 +887,8 @@ def main():
             "video_encoder": video_encoder,
             "frame_queue_size": frame_queue_size,
             "result_queue_size": result_queue_size,
+            "io_queue_put_timeout_seconds": io_queue_put_timeout_seconds,
+            "io_thread_stop_timeout_seconds": io_thread_stop_timeout_seconds,
         },
     }
     timing_path = os.path.join(output_dir, "timing_report_even_faster.json")
