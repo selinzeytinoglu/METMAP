@@ -7,7 +7,7 @@ The pipeline is divided into these steps:
 1. **Extract frames**: extract frames from video using ffmpeg
 2. **Create prompt**: use Gradio GUI to create prompts on AOIs for SAM2
 3. **Segment**: run SAM 2 inside Docker to segment ROIs and generate segmentation masks for each frame
-4. **Map gaze data**: map gaze position data onto segmentation masks to produce visual fixation information
+4. **Map Gaze Data to AOIs**: map gaze position data onto segmentation masks to produce visual fixation information
 
 ## Requirements
 - Pupil Invisible eye-tracking video and gaze_positions.csv file (or any MET file formatted in this way)
@@ -17,7 +17,34 @@ The pipeline is divided into these steps:
 - Docker Desktop
 - NVIDIA GPU and drivers
 
-## Setup
+## Preprocessing
+
+## Synchronization [`sync.py`](synchronization/sync.py)
+When integrating MET data with additional recording sources such as a room camera or a second participant's eye tracker the recordings must be aligned to a common timeline. This is handled by the scripts in the `synchronization/` folder.
+
+**Lights-on/lights-off protocol**  
+Before each session begins, the experimenter briefly toggles the room lights. This creates a sharp luminance change that is visible in all simultaneous recordings. The pipeline detects this event by computing the mean pixel intensity per frame and finding where the change between consecutive frames exceeds a threshold. That frame's timestamp becomes the synchronization marker. All event times are then adjusted relative to this shared anchor, so corresponding frames across recordings represent the same real-world moment (e.g., Frame 1 in one recording may align to Frame 30 in another after offset correction).
+
+For accurate frame-level synchronization, all recordings should be acquired or exported at the same frame rate.
+
+**Running synchronization**  
+Configure the variables at the top of `run_sync.py`, then prepare a `participants.csv` with the following columns:
+
+| Column | Description |
+|---|---|
+| `participant_id` | Unique label for the session |
+| `reference_video` | Path to the reference recording (e.g. room camera) |
+| `target_video` | Path to the recording you want to align to |
+
+```bash
+python run_sync.py
+```
+
+Results are saved to `sync_results.csv` with the lights-on timestamp from each recording and the computed `offset_sec`. To find where any event falls in the target recording: `target_time = reference_time + offset_sec`.
+
+---
+
+## SAM 2-Based Processing Environment Setup
 All parameters for the pipeline need to be configured inside the `config.yaml` file or `batch_config.yaml` file, depending on whether the user is processing a few participant IDs manually or wants to process large-scale participant data automatically.
 
 ## 1. Extract Frames
@@ -108,32 +135,7 @@ For processing multiple participant IDs in batches, including overnight unattend
 - **Comprehensive reporting**: ASCII summary table showing which participants succeeded/failed with error details
 - **Resumable workflows**: Failed participants can be re-run by editing batch_config.yaml
 
-## Synchronization [`sync.py`](synchronization/sync.py)
-When integrating MET data with additional recording sources such as a room camera or a second participant's eye tracker the recordings must be aligned to a common timeline. This is handled by the scripts in the `synchronization/` folder.
-
-**Lights-on/lights-off protocol**  
-Before each session begins, the experimenter briefly toggles the room lights. This creates a sharp luminance change that is visible in all simultaneous recordings. The pipeline detects this event by computing the mean pixel intensity per frame and finding where the change between consecutive frames exceeds a threshold. That frame's timestamp becomes the synchronization marker. All event times are then adjusted relative to this shared anchor, so corresponding frames across recordings represent the same real-world moment (e.g., Frame 1 in one recording may align to Frame 30 in another after offset correction).
-
-For accurate frame-level synchronization, all recordings should be acquired or exported at the same frame rate.
-
-**Running synchronization**  
-Configure the variables at the top of `run_sync.py`, then prepare a `participants.csv` with the following columns:
-
-| Column | Description |
-|---|---|
-| `participant_id` | Unique label for the session |
-| `reference_video` | Path to the reference recording (e.g. room camera) |
-| `target_video` | Path to the recording you want to align to |
-
-```bash
-python run_sync.py
-```
-
-Results are saved to `sync_results.csv` with the lights-on timestamp from each recording and the computed `offset_sec`. To find where any event falls in the target recording: `target_time = reference_time + offset_sec`.
-
----
-
-## 4. Map gaze data [`map_gaze_data.py`](sam2_pipeline/scripts/map_gaze_data.py)
+## 4. Map Gaze Data to AOIs [`map_gaze_data.py`](sam2_pipeline/scripts/map_gaze_data.py)
 The final step is to use the segmentation masks and gaze position information to determine visual fixations. Run the map gaze data script by calling:
 `python map_gaze_data.py`  
 This produces the following outputs in your output_dir:
