@@ -429,6 +429,12 @@ CANVAS_JS = r"""
     return state.prompts[key];
   }
   function activeLabel() {
+    // Read the browser selection synchronously; the Python bridge can lag a click.
+    const checked = document.querySelector('#active-label-radio input[type="radio"]:checked');
+    if (checked && checked.value) {
+      state.selectedLabel = checked.value;
+      return state.selectedLabel;
+    }
     const bridge = componentInput("active-label-bridge");
     if (bridge && bridge.value) state.selectedLabel = bridge.value;
     return state.selectedLabel || "";
