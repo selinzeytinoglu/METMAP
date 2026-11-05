@@ -58,16 +58,16 @@ def render_frame(folder_path, image_files, frame_idx, dots_by_frame):
 def load_folder(folder_path):
     folder_path = folder_path.strip().strip('"')
     if not folder_path or not os.path.isdir(folder_path):
-        return None, "", [], gr.update(maximum=0, value=0), "Invalid folder path.", {}
+        return None, "", [], gr.update(maximum=1, value=0), "Invalid folder path.", {}
 
     image_files = get_image_files(folder_path)
     if not image_files:
-        return None, "", [], gr.update(maximum=0, value=0), "No image files found in folder.", {}
+        return None, "", [], gr.update(maximum=1, value=0), "No image files found in folder.", {}
 
     dots_by_frame = {}
     display_img, _, _, _, _ = render_frame(folder_path, image_files, 0, dots_by_frame)
 
-    slider_update = gr.update(minimum=0, maximum=len(image_files) - 1, value=0, step=1)
+    slider_update = gr.update(minimum=0, maximum=max(1, len(image_files) - 1), value=0, step=1)
     status = f"Loaded {len(image_files)} frames.  Frame 1 / {len(image_files)}"
 
     return display_img, folder_path, image_files, slider_update, status, dots_by_frame
@@ -235,7 +235,7 @@ def build_app(config_path=None):
             )
             update_labels_btn = gr.Button("Update Labels", scale=1)
 
-        frame_slider = gr.Slider(minimum=0, maximum=0, step=1, value=0, label="Frame")
+        frame_slider = gr.Slider(minimum=0, maximum=1, step=1, value=0, label="Frame")
 
         with gr.Row():
             label_dropdown = gr.Dropdown(
