@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     wget \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Python dependencies
@@ -21,7 +22,8 @@ RUN pip install --no-cache-dir \
     tqdm \
     hydra-core \
     iopath \
-    pyyaml
+    pyyaml \
+    gradio
 
 # Copy SAM2 source and install as a package so Hydra can find configs
 COPY sam2/ ./sam2/
@@ -39,4 +41,4 @@ COPY scripts/ ./scripts/
 # /data is the mount point for the user's data (frames, prompts, output)
 VOLUME ["/data"]
 
-CMD ["python", "scripts/segment_video.py"]
+CMD ["bash"]
