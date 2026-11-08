@@ -187,7 +187,7 @@ class BatchProcessor:
 
     def _extract_frames(self, participant_id: str, start_frame: int, end_frame: int) -> Tuple[bool, Optional[str]]:
         """
-        Extract video frames locally using FFmpeg.
+        Extract video frames using containerized FFmpeg via Docker.
         
         Extracts a frame range from source video file using FFmpeg. Supports both:
           - Direct extraction from raw video files (if video_path_pattern specified)
@@ -233,33 +233,34 @@ class BatchProcessor:
             logging.warning(f"[EXTRACT] Skipping frame extraction; ensure frames exist or verify video_path_pattern")
             return False, None
         
-        # Construct FFmpeg command for frame extraction
+        # Construct containerized FFmpeg command for frame extraction (zero host dependencies)
         try:
             frames_dir.mkdir(parents=True, exist_ok=True)
             
             # FFmpeg filter: select only frames between start_frame and end_frame (inclusive)
             filter_expr = f"select='between(n\\,{int(start_frame)}\\,{int(end_frame)})'"
             
-            # FFmpeg command parameters:
-            # -y: overwrite existing output without asking
-            # -threads 1: single-threaded for stability
-            # -i: input video file
-            # -vf: video filter (frame selection)
-            # -vsync 0: no frame sync (preserve exact frame count)
-            # -q:v 2: high quality JPEG output (2=highest quality, 31=lowest)
-            # -start_number 0: start naming at 00000.jpg
-            # -loglevel error: suppress verbose FFmpeg output
+            video_parent = Path(video_path).resolve().parent
+            video_name = Path(video_path).name
+            abs_frames_dir = Path(frames_dir).resolve()
+            docker_img = self.cfg.get("docker", {}).get("image_name", "sam2:latest")
+            
             command = [
+                "docker", "run", "--rm",
+                "-v", f"{video_parent}:/video:ro",
+                "-v", f"{abs_frames_dir}:/output",
+                docker_img,
                 "ffmpeg", "-y", "-threads", "1",
-                "-i", str(video_path),
+                "-i", f"/video/{video_name}",
                 "-vf", filter_expr,
                 "-vsync", "0",
                 "-q:v", "2",
                 "-start_number", "0",
                 "-loglevel", "error",
-                os.path.join(str(frames_dir), "%05d.jpg")
+                "/output/%05d.jpg"
             ]
             
+            logging.info(f"[EXTRACT] Executing containerized FFmpeg in Docker for {participant_id}")
             logging.debug(f"[EXTRACT] FFmpeg command: {' '.join(command)}")
             
             # Execute FFmpeg extraction
