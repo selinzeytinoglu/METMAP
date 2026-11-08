@@ -26,6 +26,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from tabulate import tabulate
 
@@ -35,6 +36,69 @@ from tabulate import tabulate
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def _load_timestamps_array(source) -> np.ndarray:
+    """Load per-frame hardware timestamps from a 1D sequence or file (CSV/NPY)."""
+    if isinstance(source, (list, tuple, np.ndarray)):
+        return np.asarray(source, dtype=np.float64)
+    p = Path(source)
+    if not p.is_file():
+        raise FileNotFoundError(f"Timestamps file not found: {p}")
+    if p.suffix.lower() == ".npy":
+        return np.load(p).astype(np.float64)
+    df = pd.read_csv(p)
+    col = next((c for c in ("world_timestamp", "timestamp", "timestamp_sec") if c in df.columns), df.columns[0])
+    return pd.to_numeric(df[col], errors="raise").to_numpy(dtype=np.float64)
+
+
+def resolve_frame_range(row, fps: float, timestamps=None) -> Tuple[int, int]:
+    """Resolve (start_frame, end_frame) from a metadata row.
+
+    Accepts either:
+      1. Absolute frame indices: Start_Frame, End_Frame
+      2. Elapsed time in seconds: Start_Sec, End_Sec (or Start_Time, End_Time)
+         - If `timestamps` (hardware capture timestamps or path to world_timestamps.csv)
+           is provided, resolves indices via binary search (np.searchsorted) relative to
+           the first frame timestamp to prevent variable-frame-rate (VFR) drift.
+         - Otherwise, converts via nominal frame rate: int(seconds * fps).
+    """
+    def _pick(*names):
+        for n in names:
+            if n in row and not (pd.isna(row[n]) or str(row[n]).strip() == ""):
+                return row[n]
+        return None
+
+    sf, ef = _pick("Start_Frame", "start_frame"), _pick("End_Frame", "end_frame")
+    if sf is not None and ef is not None:
+        start, end = int(sf), int(ef)
+    else:
+        ss = _pick("Start_Sec", "Start_Time", "start_sec", "start_time")
+        es = _pick("End_Sec", "End_Time", "end_sec", "end_time")
+        if ss is None or es is None:
+            raise ValueError(
+                "Metadata row must provide either Start_Frame/End_Frame or "
+                "Start_Sec/End_Sec (with 'defaults.fps' set in batch_config.yaml)."
+            )
+        ss_val, es_val = float(ss), float(es)
+        ts_source = timestamps or _pick("Timestamps_File", "timestamps_file", "world_timestamps")
+        if ts_source is not None:
+            ts_arr = _load_timestamps_array(ts_source)
+            if len(ts_arr) == 0:
+                raise ValueError("Provided timestamps array is empty.")
+            ref = ts_arr - ts_arr[0]
+            def _nearest(val: float) -> int:
+                idx = int(np.clip(np.searchsorted(ref, val), 0, len(ref) - 1))
+                if idx > 0 and abs(val - ref[idx - 1]) <= abs(ref[idx] - val):
+                    return idx - 1
+                return idx
+            start, end = _nearest(ss_val), _nearest(es_val)
+        else:
+            start, end = int(ss_val * float(fps)), int(es_val * float(fps))
+
+    if start < 0 or end < start:
+        raise ValueError(f"Invalid frame range resolved: ({start}, {end})")
+    return start, end
 
 
 # ============================================================================
@@ -167,7 +231,8 @@ class BatchProcessor:
             error_msg = (
                 f"Metadata CSV not found: {csv_path.absolute()}\n"
                 f"Expected file: {self.cfg['frame_extraction']['metadata_csv_path']}\n"
-                f"Create CSV with columns: Participant_ID, Start_Frame, End_Frame"
+                f"Create CSV with columns: Participant_ID, Start_Frame, End_Frame\n"
+                f"(or Participant_ID, Start_Sec, End_Sec for a timestamp-based input)"
             )
             logging.error(error_msg)
             raise FileNotFoundError(error_msg)
@@ -462,8 +527,9 @@ class BatchProcessor:
                 self.results["skipped"].append(participant_id)
                 return False
             
-            start_frame = int(participant_row.iloc[0]["Start_Frame"])
-            end_frame = int(participant_row.iloc[0]["End_Frame"])
+            start_frame, end_frame = resolve_frame_range(
+                participant_row.iloc[0], self.cfg["defaults"]["fps"]
+            )
             logging.debug(f"[PROCESS] Frame range: {start_frame}-{end_frame}")
             
             # Step 2: Validate prompt file
