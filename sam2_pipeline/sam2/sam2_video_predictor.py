@@ -557,6 +557,8 @@ class SAM2VideoPredictor(SAM2Base):
         num_frames = inference_state["num_frames"]
         batch_size = self._get_obj_num(inference_state)
 
+        inference_state["iou_pred_per_frame"] = {}
+
         # set start index, end index, and processing order
         if start_frame_idx is None:
             # default: start from the earliest frame with input points
@@ -582,6 +584,7 @@ class SAM2VideoPredictor(SAM2Base):
 
         for frame_idx in tqdm(processing_order, desc="propagate in video"):
             pred_masks_per_obj = [None] * batch_size
+            iou_per_obj = []
             for obj_idx in range(batch_size):
                 obj_output_dict = inference_state["output_dict_per_obj"][obj_idx]
                 # We skip those frames already in consolidated outputs (these are frames
@@ -617,6 +620,7 @@ class SAM2VideoPredictor(SAM2Base):
                     "reverse": reverse
                 }
                 pred_masks_per_obj[obj_idx] = pred_masks
+                iou_per_obj.append(current_out.get("iou_pred"))
 
             # Resize the output mask to the original video resolution (we directly use
             # the mask scores on GPU for output to avoid any CPU conversion in between)
@@ -627,6 +631,7 @@ class SAM2VideoPredictor(SAM2Base):
             _, video_res_masks = self._get_orig_video_res_output(
                 inference_state, all_pred_masks
             )
+            inference_state["iou_pred_per_frame"][frame_idx] = iou_per_obj
             yield frame_idx, obj_ids, video_res_masks
 
     @torch.inference_mode()
@@ -799,6 +804,7 @@ class SAM2VideoPredictor(SAM2Base):
             "pred_masks": pred_masks,
             "obj_ptr": obj_ptr,
             "object_score_logits": object_score_logits,
+            "iou_pred": current_out.get("iou_pred"),
         }
         return compact_current_out, pred_masks_gpu
 
