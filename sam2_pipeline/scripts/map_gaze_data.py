@@ -19,6 +19,7 @@ import pandas as pd
 from tqdm import tqdm
 import csv
 import numpy as np
+from glasses_adapter import load_universal_gaze
 
 # Color palette for mask overlays (BGR format for OpenCV)
 MASK_COLORS = [
@@ -44,8 +45,8 @@ def map_gaze_data(base_dir, frames_dir, gaze_path, masks_dir, start_frame, end_f
     fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
     out_video = cv2.VideoWriter(out_video_path, fourcc, fps, (width, height))
 
-    # Load gaze data
-    frames = pd.read_csv(gaze_path)
+    # Load and standardize gaze data
+    frames = load_universal_gaze(gaze_path)
 
     # Setup fixations
     prev_fixation = None
@@ -74,7 +75,7 @@ def map_gaze_data(base_dir, frames_dir, gaze_path, masks_dir, start_frame, end_f
         pbar.update(1)
 
         frame_num = i + start_frame
-        gaze_data = frames[frames.world_index == frame_num].iloc[:, 3:5].values
+        gaze_data = frames.loc[frames.frame_idx == frame_num, ["gaze_x_norm", "gaze_y_norm"]].values
 
         frame = cv2.imread(os.path.join(frames_dir, frame_names[i]))
         mask_path = masks_dict[i]

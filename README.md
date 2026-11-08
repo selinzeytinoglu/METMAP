@@ -10,14 +10,23 @@ The pipeline is divided into these steps:
 4. **Map Gaze Data to AOIs**: map gaze position data onto segmentation masks to produce visual fixation information
 
 ## Requirements
-- Pupil Invisible eye-tracking video and gaze_positions.csv file (or any MET file formatted in this way)
+- POV eye-tracking video and gaze data CSV (`gaze_positions.csv` from Pupil Labs, or any tracker export standardized via `glasses_adapter.py`)
 - Windows 10/11 with WSL2 enabled
 - Python 3.10+
-- ffmpeg
 - Docker Desktop
 - NVIDIA GPU and drivers
 
 ## Preprocessing
+
+### Multi-Tracker Gaze Ingestion [`glasses_adapter.py`](sam2_pipeline/scripts/glasses_adapter.py)
+Although METMAP was developed with Pupil Invisible recordings, gaze exports from other eye-tracking systems—including [glassesTools](https://github.com/dcnieho/glassestools), Pupil Core/Neon, Tobii Pro Glasses 2/3, or custom CSV/TSV files—can be converted into METMAP's standardized input schema (`frame_idx`, `gaze_x_norm`, `gaze_y_norm`, `timestamp_sec`, bottom-left origin) prior to gaze mapping:
+
+```bash
+python sam2_pipeline/scripts/glasses_adapter.py path/to/gaze_export.tsv \
+    --video-width 1280 --video-height 720 \
+    --coordinate-origin top_left \
+    --output path/to/gaze_standardized.csv
+```
 
 ## Synchronization [`sync.py`](synchronization/sync.py)
 When integrating MET data with additional recording sources such as a room camera or a second participant's eye tracker the recordings must be aligned to a common timeline. This is handled by the scripts in the `synchronization/` folder.
