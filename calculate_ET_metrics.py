@@ -13,6 +13,9 @@ CORE METRICS CALCULATED PER PARTICIPANT & AOI (Table X - Eye-tracking Metrics):
 6. Latency to First Fixation: Time from session onset to first AOI look (latency_to_first_fixation)
 7. Transition Probability: Likelihood of gaze shifting between AOIs (transition_probability_to_[target])
 8. Temporal Dynamics: Gaze allocation changes across task phases (temporal_dynamics_phase[N])
+9. Visibility-Relative Dwell (NPDT): AOI dwell as a fraction of the time the AOI was actually
+   visible in the scene camera (visibility_relative_dwell); only computed when an AOI visibility
+   duration map is supplied.
 
 Wide-form output: One row per participant-AOI pair with all metrics as columns.
 Eye-tracking metrics calculator for comprehensive attention analysis.
@@ -22,8 +25,9 @@ import argparse
 import csv
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
+import numpy as np
 import pandas as pd
 
 
@@ -71,7 +75,7 @@ def calculate_fixation_events(
             run_end = idx - 1
             run_len = run_end - run_start + 1
 
-            if include_none or run_label != "None":
+            if include_none or str(run_label).strip().lower() != "none":
                 events.append(
                     {
                         "participant_id": participant_id,
@@ -89,7 +93,7 @@ def calculate_fixation_events(
 
     run_end = len(dominant_sequence) - 1
     run_len = run_end - run_start + 1
-    if include_none or run_label != "None":
+    if include_none or str(run_label).strip().lower() != "none":
         events.append(
             {
                 "participant_id": participant_id,
@@ -116,6 +120,32 @@ def calculate_proportion_of_dwell_time(
 ) -> float:
     """Calculate dwell time as proportion of total participant session time."""
     return _safe_div(dwell_time, participant_total_time)
+
+
+def calculate_visibility_relative_dwell(
+    dwell_time_ms: float,
+    visible_duration_ms: float
+) -> float:
+    """
+    Calculate Normalized Proportion of Dwell Time (NPDT) relative to
+    the duration the AOI was actually visible in the scene camera.
+    """
+    return _safe_div(dwell_time_ms, visible_duration_ms)
+
+
+def compute_visible_frames_from_masks(masks_dir: Path) -> Dict[str, int]:
+    """Count frames in which each AOI mask contains at least one positive pixel."""
+    npz_files = sorted(Path(masks_dir).glob("frame_*.npz"))
+    if not npz_files:
+        raise FileNotFoundError(f"No frame_*.npz mask files found in: {masks_dir}")
+    counts: Dict[str, int] = {}
+    for npz_path in npz_files:
+        with np.load(npz_path) as data:
+            for aoi in data.files:
+                counts.setdefault(aoi, 0)
+                if np.any(data[aoi] > 0):
+                    counts[aoi] += 1
+    return counts
 
 
 def calculate_fixation_count(fixation_events_for_aoi: List[Dict[str, Any]]) -> int:
@@ -272,7 +302,8 @@ def calculate_temporal_dynamics(
 
 def calculate_summary_scores(
     fixation_events: List[Dict[str, Any]],
-    num_phases: int = 3
+    num_phases: int = 3,
+    aoi_visible_ms: Optional[Dict[str, float]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Aggregate fixation events into comprehensive summary statistics (wide-form CSV).
@@ -286,10 +317,14 @@ def calculate_summary_scores(
     6. latency_to_first_fixation
     7. transition_probability_to_[AOIs] (alphabetically sorted targets)
     8. temporal_dynamics_phase[N]
+    9. visibility_relative_dwell (NPDT; only when aoi_visible_ms is provided)
     
     Args:
         fixation_events: List of fixation event dicts
         num_phases: Number of temporal phases (default: 3)
+        aoi_visible_ms: Optional mapping of AOI name -> total duration (ms) the AOI mask was
+            visible in the scene camera. When provided, a `visibility_relative_dwell` (NPDT)
+            column is added = dwell_time / visible_duration. AOIs absent from the map receive 0.0.
     
     Returns:
         List of wide-form summary dicts (one row per participant-AOI)
@@ -399,6 +434,12 @@ def calculate_summary_scores(
                 phase_proportions.get(phase_num, 0.0)
             )
         
+        # 9. Visibility-Relative Dwell (NPDT) - only when visibility durations are supplied
+        if aoi_visible_ms is not None:
+            row_dict["visibility_relative_dwell"] = calculate_visibility_relative_dwell(
+                dwell_time, aoi_visible_ms.get(aoi, 0.0)
+            )
+        
         summary_rows.append(row_dict)
     
     return summary_rows
@@ -430,6 +471,8 @@ def load_fixations_from_csv(csv_path: Path, fps: float = 30.0, participant_id: s
     
     for _, row in df.iterrows():
         aoi_name = str(row["name"]).strip()
+        if aoi_name.lower() == "none":
+            continue
         start_frame = int(row["start frame"])
         end_frame = int(row["end frame"])
         duration_frames = int(row["frame duration"])
@@ -508,6 +551,26 @@ if __name__ == "__main__":
         default=3,
         help="Number of temporal phases to divide session into (default: 3)",
     )
+    parser.add_argument(
+        "--masks-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Optional directory of SAM 2 per-frame mask archives (frame_*.npz). "
+            "When provided, counts frames where each AOI mask is non-empty and computes "
+            "visibility_relative_dwell (NPDT)."
+        ),
+    )
+    parser.add_argument(
+        "--visibility-json",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSON file mapping AOI name -> total number of frames the AOI mask was "
+            "visible in the scene camera. When provided, a visibility_relative_dwell (NPDT) "
+            "column is added to the output: dwell_time / (visible_frames * 1000 / fps)."
+        ),
+    )
     
     args = parser.parse_args()
     
@@ -527,8 +590,30 @@ if __name__ == "__main__":
     )
     print(f"Loaded {len(fixation_events)} fixation events")
     
+    # Optional AOI visibility durations (frames) -> milliseconds
+    aoi_visible_ms = None
+    visible_frames_by_aoi = None
+    if args.visibility_json is not None:
+        with args.visibility_json.open("r", encoding="utf-8") as f:
+            visible_frames_by_aoi = json.load(f)
+        print(f"Loaded visibility frame counts from JSON: {args.visibility_json}")
+    elif args.masks_dir is not None:
+        visible_frames_by_aoi = compute_visible_frames_from_masks(args.masks_dir)
+        print(f"Computed visibility frame counts for {len(visible_frames_by_aoi)} AOIs from masks: {args.masks_dir}")
+
+    if visible_frames_by_aoi is not None:
+        frame_ms = 1000.0 / float(args.fps)
+        aoi_visible_ms = {
+            str(aoi): float(frames) * frame_ms
+            for aoi, frames in visible_frames_by_aoi.items()
+        }
+    
     print("Calculating summary scores...")
-    summary_scores = calculate_summary_scores(fixation_events, num_phases=args.num_phases)
+    summary_scores = calculate_summary_scores(
+        fixation_events,
+        num_phases=args.num_phases,
+        aoi_visible_ms=aoi_visible_ms,
+    )
     print(f"Generated {len(summary_scores)} summary score rows")
     
     # Save results to nested structure
