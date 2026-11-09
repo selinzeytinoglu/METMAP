@@ -74,12 +74,17 @@ frame_extraction:
   
   # Path to CSV metadata file containing start/stop frame indices for each participant
   # File location: same directory as batch_processor.py or use absolute path
-  # REQUIRED columns: Participant_ID (or ID), Start_Frame, End_Frame
-  # Example file format:
+  # REQUIRED columns: Participant_ID (or ID), and EITHER:
+  #   - Start_Frame, End_Frame   (absolute frame indices), OR
+  #   - Start_Sec, End_Sec       (seconds; converted via defaults.fps or optional Timestamps_File column)
+  # Example file format (frames):
   #   Participant_ID,Start_Frame,End_Frame
   #   510,3997,9393
   #   511,2500,8200
   #   512,1800,7600
+  # Example file format (times):
+  #   Participant_ID,Start_Sec,End_Sec
+  #   510,133.4,313.5
   # If file is missing, batch_processor will error clearly listing the path it tried
   metadata_csv_path: "frames_childpeer.csv"
   
