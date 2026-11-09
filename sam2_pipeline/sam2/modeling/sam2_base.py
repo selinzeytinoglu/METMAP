@@ -849,7 +849,7 @@ class SAM2Base(torch.nn.Module):
         (
             _,
             _,
-            _,
+            ious,
             low_res_masks,
             high_res_masks,
             obj_ptr,
@@ -859,6 +859,7 @@ class SAM2Base(torch.nn.Module):
         current_out["pred_masks"] = low_res_masks
         current_out["pred_masks_high_res"] = high_res_masks
         current_out["obj_ptr"] = obj_ptr
+        current_out["iou_pred"] = ious
         if not self.training:
             # Only add this in inference (to avoid unused param in activation checkpointing;
             # it's mainly used in the demo to encode spatial memories w/ consolidated masks)

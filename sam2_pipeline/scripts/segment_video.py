@@ -73,6 +73,7 @@ def add_clicks(predictor, inference_state, ann_frame_idx, ann_obj_id, points, la
         obj_id=ann_obj_id,
         points=points,
         labels=labels,
+        clear_old_points=False,
     )
     return out_obj_ids, out_mask_logits
 
@@ -144,6 +145,7 @@ def main():
     prompt_sam2(coordinates, name_to_obj_id, inference_state, predictor)
 
     tprev = -1
+    predicted_iou = {}
 
     for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
         if (perf_counter() > tprev + 1.0) and torch.cuda.is_available():
@@ -151,13 +153,22 @@ def main():
             print("VRAM:", (total_bytes - free_bytes) // 1_000_000, "MB")
             tprev = perf_counter()
 
+        iou_per_obj = inference_state.get("iou_pred_per_frame", {}).get(out_frame_idx, [])
+
         # Save masks for this frame
         frame_masks = {}
+        frame_conf = {}
         for i, out_obj_id in enumerate(out_obj_ids):
             out_mask = (out_mask_logits[i] > 0.0).cpu().numpy()
             if out_mask.shape[0] == 1 and len(out_mask.shape) == 3:
                 out_mask = np.squeeze(out_mask, axis=0)
-            frame_masks[obj_id_to_name[out_obj_id]] = out_mask
+            name = obj_id_to_name[out_obj_id]
+            frame_masks[name] = out_mask
+            iou = iou_per_obj[i] if i < len(iou_per_obj) else None
+            frame_conf[name] = (
+                round(float(iou.reshape(-1).max().detach().cpu()), 4) if iou is not None else None
+            )
+        predicted_iou[f"frame_{out_frame_idx:05d}"] = frame_conf
 
         mask_path = os.path.join(masks_folder_path, f"frame_{out_frame_idx:05d}.npz")
         np.savez_compressed(mask_path, **frame_masks)
@@ -182,6 +193,9 @@ def main():
         plt.close(fig)
 
     video_writer.release()
+
+    with open(os.path.join(output_dir, "predicted_iou.json"), "w") as f:
+        json.dump(predicted_iou, f, indent=2)
 
 
 if __name__ == "__main__":
