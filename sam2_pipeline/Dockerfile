@@ -12,7 +12,6 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     wget \
-    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Python dependencies
@@ -20,6 +19,7 @@ RUN pip install --no-cache-dir \
     opencv-python-headless \
     matplotlib \
     pillow \
+    pandas \
     tqdm \
     hydra-core \
     iopath \
