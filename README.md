@@ -89,12 +89,12 @@ For processing one participant at a time with explicit Docker commands:
 **Build the Docker image**  
 This only needs to be done once.
 ```bash
-docker build -t sam2 .
+docker build -t sam2 ./sam2_pipeline
 ```
 
 **Run segmentation**
 ```bash
-docker run --gpus all --rm -v "C:\Users\user\sample_data:/data" -v "C:\Users\user\METPROCESSING\sam2_pipeline\config.yaml:/config/config.yaml" sam2
+docker run --gpus all --rm -v "C:\Users\user\sample_data:/data" -v "C:\Users\user\METMAP\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/segment_video.py
 ```
 
 The `docker run` command starts the segmentation pipeline. Since the container is isolated from your machine, any files required while running need to be mounted beforehand using the `-v` flag, which maps a path on your machine to a path usable inside the container.
@@ -123,7 +123,7 @@ For processing multiple participant IDs in batches, including overnight unattend
 
 2. **Build the Docker image** (if not already built):
    ```bash
-   docker build -t sam2 .
+   docker build -t sam2 ./sam2_pipeline
    ```
 
 3. **Run the batch processor:**
@@ -156,13 +156,13 @@ This produces the following outputs in your output_dir:
 
 ## New Docker Commands
 ### 1. Extract frames
-`docker run --rm -v "C:\...\data:/data" -v "C:\...\config.yaml:/config/config.yaml" sam2 python scripts/extract_frames.py`
+`docker run --rm -v "C:\...\sample_data:/data" -v "C:\...\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/extract_frames.py`
 
 ### 2. Prompt
-`docker run --rm -p 7860:7860 -v "C:\...\data:/data" -v "C:\...\config.yaml:/config/config.yaml" sam2 python scripts/prompter_gradio.py`
+`docker run --rm -p 7860:7860 -v "C:\...\sample_data:/data" -v "C:\...\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/prompter_gradio.py`
 
 ### 3. Segment
-`docker run --gpus all --rm -v "C:\...\data:/data" -v "C:\...\config.yaml:/config/config.yaml" sam2 python scripts/segment_video.py`
+`docker run --gpus all --rm -v "C:\...\sample_data:/data" -v "C:\...\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/segment_video.py`
 
 ### 4. Map gaze
-`docker run --rm -v "C:\...\data:/data" -v "C:\...\config.yaml:/config/config.yaml" sam2 python scripts/map_gaze_data.py`
+`docker run --rm -v "C:\...\sample_data:/data" -v "C:\...\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/map_gaze_data.py`

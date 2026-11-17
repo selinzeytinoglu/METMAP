@@ -95,13 +95,16 @@ def main():
         participant_id = sys.argv[1]
         print(f"[BATCH] Processing participant: {participant_id}")
     
-    config_path = "/config/config.yaml"
+    default_cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.yaml")
+    config_path = "/config/config.yaml" if os.path.isfile("/config/config.yaml") else default_cfg
 
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
+    data_dir = cfg["docker_data_dir"] if os.path.isdir(cfg["docker_data_dir"]) else cfg["local_data_dir"]
+
     def p(relative_path):
-        return os.path.join(cfg["docker_data_dir"], relative_path)
+        return os.path.join(data_dir, relative_path)
 
     video_dir = p(cfg["frames_dir"])
     prompt_coordinates = p(cfg["prompt_coordinates"])
