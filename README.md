@@ -57,13 +57,15 @@ Results are saved to `sync_results.csv` with the lights-on timestamp from each r
 All parameters for the pipeline need to be configured inside the `config.yaml` file or `batch_config.yaml` file, depending on whether the user is processing a few participant IDs manually or wants to process large-scale participant data automatically.
 
 ## 1. Extract Frames
-ffmpeg is required to extract frames from the input video. You can download the compiled Windows build from https://ffmpeg.org/download.html and add it to the system path.
+Frame extraction uses `ffmpeg`, which is already bundled inside the Docker image (or you can run `ffmpeg` locally if installed):
 ```bash
-ffmpeg -i "path/to/video.mp4" -vf
-"select=between(n\,START_FRAME\,END_FRAME),setpts=PTS-STARTPTS" -q:v 2 -start_number 0
-path/to/frames/'%05d.jpg'
+docker run --rm -v "C:\Users\user\sample_data:/data" -v "C:\Users\user\METMAP\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/extract_frames.py
 ```
-Use this ffmpeg command to extract frames from the POV video. The video should not have any visual overlays (like a gaze indicator dot) as this may interfere with segmentation results.
+For manual extraction outside Docker:
+```bash
+ffmpeg -i "path/to/video.mp4" -vf "select=between(n\,START_FRAME\,END_FRAME),setpts=PTS-STARTPTS" -vsync 0 -q:v 2 -start_number 0 path/to/frames/'%05d.jpg'
+```
+The video should not have any visual overlays (like a gaze indicator dot) as this may interfere with segmentation results.
   
 **Replace the following:**
 - `path/to/video.mp4` with path to POV video from Pupil glasses
@@ -71,11 +73,19 @@ Use this ffmpeg command to extract frames from the POV video. The video should n
 - `path/to/frames` with the path to the output folder where the frames will be stored
 
 ## 2. Create prompt [`prompter_gradio.py`](sam2_pipeline/scripts/prompter_gradio.py)
-AOIs must be annotated using the Gradio GUI which can be run using the following commands:  
-`pip install gradio pillow pyyaml`  
-`python prompter_gradio.py`  
-The GUI will be accessible through your browser and will automatically load the frames folder specified in `config.yaml`. Use the slider to navigate through frames and click on AOIs to create prompts.
+AOIs must be annotated using the Gradio GUI. Because **Preview Mask** runs SAM 2 single-frame inference, run it either inside the Docker image (recommended) or in a host Python environment with `torch`, `sam2` (`pip install -e ./sam2_pipeline`), `gradio`, `pillow`, `numpy`, and `pyyaml` installed (note: `pip install gradio pillow pyyaml` alone is not sufficient for **Preview Mask**):
+
+**Docker (recommended):**
+```bash
+docker run --gpus all --rm -p 7860:7860 -v "C:\Users\user\sample_data:/data" -v "C:\Users\user\METMAP\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/prompter_gradio.py
+```
+**Host Python (with `torch` + `sam2` installed):**
+```bash
+python sam2_pipeline/scripts/prompter_gradio.py
+```
+The GUI will be accessible through your browser (`http://localhost:7860`) and will automatically load the frames folder specified in `config.yaml`. Use the slider to navigate through frames and click on AOIs to create prompts.
 - Set the click mode to **Positive** for clicks inside the AOI and **Negative** for clicks outside the AOI
+- Click **Preview Mask** to run SAM 2 on the current frame and inspect the predicted mask overlay before saving (add positive/negative refinement clicks if needed, or click **Clear Preview**)
 - Prompts can be placed across multiple frames for better tracking accuracy
 - You will only have to annotate a few frames where the AOIs are clearly visible and SAM2 will track them throughout the rest of the video
 - When finished, click **Save Coordinates** to export the prompt points to a JSON.
@@ -105,7 +115,7 @@ This pipeline requires two mounts:
 
 Inside the command, the left side of the string (before the colon) **must** be changed to match the path of your data and config files.
 <br>
-The output of this step will be segmentation masks for each frame of the video. Here is an example of the segmentation masks for 1 frame:
+The output of this step will be segmentation masks for each frame of the video (`output/masks/frame_XXXXX.npz`), a verification overlay video (`output/output_video.mp4`), and per-frame SAM 2 predicted-IoU confidence scores (`output/predicted_iou.json`). Here is an example of the segmentation masks for 1 frame:
 ![mask example](assets/masks.png)
 
 ---
@@ -115,9 +125,10 @@ For processing multiple participant IDs in batches, including overnight unattend
 
 1. **Configure the batch processor:**
    - Edit `batch_config.yaml` to specify:
-     - Participant ID range (e.g., [510, 600]) or explicit list (e.g., [510, 514, 520])
+     - Participant ID range (e.g., `[510, 600]`) or explicit list (e.g., `[510, 514, 520]`)
      - Local and Docker data paths
-     - Video source paths for FFmpeg extraction (must be named according to participant ID to use pattern-matching, e.g., `participant_510.mp4`)
+     - Metadata CSV with `Participant_ID` and either `Start_Frame`/`End_Frame` or `Start_Sec`/`End_Sec` (with optional `Timestamps_File` for hardware timestamps)
+     - Video source paths for containerized FFmpeg extraction (must be named according to participant ID to use pattern-matching, e.g., `participant_510.mp4`)
      - Frame extraction and segmentation settings
      - GPU allocation and logging preferences
 
@@ -148,18 +159,23 @@ For processing multiple participant IDs in batches, including overnight unattend
 The final step is to use the segmentation masks and gaze position information to determine visual fixations. Run the map gaze data script by calling:
 `python map_gaze_data.py`  
 This produces the following outputs in your output_dir:
-- fixations.csv: fixation events with duration and timestamps (an example output can be found [here](assets/510_fixations.csv))
-- fixations_expanded.csv: one row per frame with the AOI the person was looking at
-- {id}_output.avi: video that displays segmentation masks and current fixation
+- `{id}_fixations.csv`: fixation events with duration and timestamps (an example output can be found [here](assets/510_fixations.csv))
+- `{id}_fixations_expanded.csv`: one row per frame with the AOI the person was looking at
+- `{id}_output.avi`: video that displays segmentation masks and current fixation
 ![output video example](assets/gaze_map.png)
 ![fixations visualization](assets/visual_attention.png)
 
-## New Docker Commands
+To compute summary AOI metrics including visibility-relative dwell time (NPDT) from `fixations_expanded.csv` and the SAM 2 masks directory:
+```bash
+python calculate_ET_metrics.py --input path/to/{id}_fixations_expanded.csv --masks-dir path/to/output/masks --fps 30.0
+```
+
+## Docker Quick Reference (Single Recording)
 ### 1. Extract frames
 `docker run --rm -v "C:\...\sample_data:/data" -v "C:\...\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/extract_frames.py`
 
-### 2. Prompt
-`docker run --rm -p 7860:7860 -v "C:\...\sample_data:/data" -v "C:\...\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/prompter_gradio.py`
+### 2. Prompt (with GPU Mask Preview)
+`docker run --gpus all --rm -p 7860:7860 -v "C:\...\sample_data:/data" -v "C:\...\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/prompter_gradio.py`
 
 ### 3. Segment
 `docker run --gpus all --rm -v "C:\...\sample_data:/data" -v "C:\...\sam2_pipeline\config.yaml:/config/config.yaml" sam2 python scripts/segment_video.py`

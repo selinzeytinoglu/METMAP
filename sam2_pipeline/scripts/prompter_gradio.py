@@ -1,9 +1,11 @@
 import argparse
+from contextlib import nullcontext
 import gradio as gr
 import numpy as np
 from PIL import Image, ImageDraw
 import json
 import os
+import sys
 import time
 import yaml
 
@@ -41,6 +43,11 @@ def get_device():
 
 def get_image_predictor(model_id):
     if model_id not in _IMAGE_PREDICTORS:
+        pipeline_dir = os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+        )
+        if pipeline_dir not in sys.path:
+            sys.path.append(pipeline_dir)
         from sam2.build_sam import HF_MODEL_ID_TO_FILENAMES, build_sam2
         from sam2.sam2_image_predictor import SAM2ImagePredictor
 
@@ -119,7 +126,11 @@ def overlay_masks(display_img, frame_masks, label_order=None, alpha=0.45):
     return Image.fromarray(np.clip(base, 0, 255).astype(np.uint8))
 
 
-def render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks=None):
+def _parse_labels(labels_text):
+    return [l.strip() for l in (labels_text or "").split(",") if l.strip()]
+
+
+def render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks=None, label_order=None):
     # Load a frame, resize to display resolution, draw any preview masks and dots, return PIL image
     # Also returns original and display dimensions needed for coordinate conversion
     img_path = os.path.join(folder_path, image_files[frame_idx])
@@ -127,7 +138,7 @@ def render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_mas
     display_img, orig_w, orig_h, disp_w, disp_h = resize_to_display(orig_img)
 
     if preview_masks and frame_idx in preview_masks:
-        display_img = overlay_masks(display_img, preview_masks[frame_idx])
+        display_img = overlay_masks(display_img, preview_masks[frame_idx], label_order=label_order)
 
     scale_x = disp_w / orig_w
     scale_y = disp_h / orig_h
@@ -179,7 +190,7 @@ def load_prompts_from_json(json_path):
     return dots_by_frame, coordinates, labels
 
 
-def load_folder(folder_path, current_labels_text=""):
+def load_folder(folder_path, current_labels_text="", output_path=""):
     folder_path = folder_path.strip().strip('"')
     if not folder_path or not os.path.isdir(folder_path):
         return None, "", [], gr.update(maximum=1, value=0), "Invalid folder path.", {}, [], {}, gr.update(), gr.update()
@@ -195,17 +206,20 @@ def load_folder(folder_path, current_labels_text=""):
     dropdown_update = gr.update()
     prompts_note = ""
 
-    prompts_json = os.path.join(folder_path, "prompts.json")
-    if os.path.isfile(prompts_json):
-        dots_by_frame, coordinates, loaded_labels = load_prompts_from_json(prompts_json)
+    output_path_clean = (output_path or "").strip().strip('"')
+    candidate_jsons = [p for p in (output_path_clean, os.path.join(folder_path, "prompts.json")) if p and os.path.isfile(p)]
+    if candidate_jsons:
+        prompt_file = candidate_jsons[0]
+        dots_by_frame, coordinates, loaded_labels = load_prompts_from_json(prompt_file)
         if loaded_labels:
-            existing = [l.strip() for l in current_labels_text.split(",") if l.strip()]
+            existing = _parse_labels(current_labels_text)
             merged = list(dict.fromkeys(loaded_labels + existing))
             labels_text_update = ",".join(merged)
             dropdown_update = gr.update(choices=merged, value=loaded_labels[0])
-            prompts_note = f" | Loaded {len(coordinates)} prompts from prompts.json"
+            prompts_note = f" | Loaded {len(coordinates)} prompts from {os.path.basename(prompt_file)}"
 
-    display_img, _, _, _, _ = render_frame(folder_path, image_files, 0, dots_by_frame, preview_masks)
+    label_order = _parse_labels(labels_text_update if isinstance(labels_text_update, str) else current_labels_text)
+    display_img, _, _, _, _ = render_frame(folder_path, image_files, 0, dots_by_frame, preview_masks, label_order=label_order)
 
     slider_update = gr.update(minimum=0, maximum=max(1, len(image_files) - 1), value=0, step=1)
     status = f"Loaded {len(image_files)} frames.  Frame 1 / {len(image_files)}{prompts_note}"
@@ -213,18 +227,20 @@ def load_folder(folder_path, current_labels_text=""):
     return display_img, folder_path, image_files, slider_update, status, dots_by_frame, coordinates, preview_masks, labels_text_update, dropdown_update
 
 
-def change_frame(frame_idx, folder_path, image_files, dots_by_frame, preview_masks):
+def change_frame(frame_idx, folder_path, image_files, dots_by_frame, preview_masks, labels_text=""):
     if not image_files:
         return None, "No folder loaded."
 
     frame_idx = int(frame_idx)
-    display_img, _, _, _, _ = render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks)
+    display_img, _, _, _, _ = render_frame(
+        folder_path, image_files, frame_idx, dots_by_frame, preview_masks, label_order=_parse_labels(labels_text)
+    )
     status = f"Frame {frame_idx + 1} / {len(image_files)}: {image_files[frame_idx]}"
     return display_img, status
 
 
 def on_image_click(evt: gr.SelectData, folder_path, image_files, frame_idx,
-                   dots_by_frame, coordinates, label, click_mode, preview_masks):
+                   dots_by_frame, coordinates, label, click_mode, preview_masks, labels_text=""):
     if not image_files:
         return None, dots_by_frame, coordinates, "No folder loaded."
 
@@ -264,7 +280,9 @@ def on_image_click(evt: gr.SelectData, folder_path, image_files, frame_idx,
         "frame": frame_idx,
     }]
 
-    display_img, _, _, _, _ = render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks)
+    display_img, _, _, _, _ = render_frame(
+        folder_path, image_files, frame_idx, dots_by_frame, preview_masks, label_order=_parse_labels(labels_text)
+    )
 
     frame_dot_count = len(dots_by_frame[frame_idx])
     status = (
@@ -275,22 +293,27 @@ def on_image_click(evt: gr.SelectData, folder_path, image_files, frame_idx,
     return display_img, dots_by_frame, coordinates, status
 
 
-def undo_last(folder_path, image_files, frame_idx, dots_by_frame, coordinates, preview_masks):
+def undo_last(folder_path, image_files, frame_idx, dots_by_frame, coordinates, preview_masks, labels_text=""):
     if not image_files:
-        return None, dots_by_frame, coordinates, "No folder loaded."
+        return None, dots_by_frame, coordinates, preview_masks, "No folder loaded."
 
     frame_idx = int(frame_idx)
     frame_dots = dots_by_frame.get(frame_idx, [])
+    label_order = _parse_labels(labels_text)
 
     if not frame_dots:
         return (
-            render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks)[0],
-            dots_by_frame, coordinates,
+            render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks, label_order=label_order)[0],
+            dots_by_frame, coordinates, preview_masks,
             "No dots on this frame to undo."
         )
 
     dots_by_frame = dict(dots_by_frame)
     dots_by_frame[frame_idx] = frame_dots[:-1]
+
+    preview_masks = dict(preview_masks or {})
+    if not dots_by_frame[frame_idx]:
+        preview_masks.pop(frame_idx, None)
 
     # Remove the last coordinate entry that belongs to this frame
     coordinates = list(coordinates)
@@ -299,61 +322,92 @@ def undo_last(folder_path, image_files, frame_idx, dots_by_frame, coordinates, p
             coordinates.pop(i)
             break
 
-    display_img, _, _, _, _ = render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks)
+    display_img, _, _, _, _ = render_frame(
+        folder_path, image_files, frame_idx, dots_by_frame, preview_masks, label_order=label_order
+    )
     status = f"Undid last point on frame {frame_idx + 1}.  Total dots: {len(coordinates)}"
-    return display_img, dots_by_frame, coordinates, status
+    return display_img, dots_by_frame, coordinates, preview_masks, status
 
 
-def preview_frame_masks(folder_path, image_files, frame_idx, dots_by_frame, preview_masks, model_id):
+def preview_frame_masks(folder_path, image_files, frame_idx, dots_by_frame, preview_masks, model_id, labels_text=""):
     if not image_files:
         return None, preview_masks, "No folder loaded."
 
     frame_idx = int(frame_idx)
+    label_order = _parse_labels(labels_text)
     frame_dots = dots_by_frame.get(frame_idx, [])
     if not frame_dots:
-        display_img, _, _, _, _ = render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks)
+        display_img, _, _, _, _ = render_frame(
+            folder_path, image_files, frame_idx, dots_by_frame, preview_masks, label_order=label_order
+        )
         return display_img, preview_masks, f"No dots on frame {frame_idx + 1} to preview."
 
     by_label = {}
     for (ox, oy, dot_type, label) in frame_dots:
         by_label.setdefault(label, []).append((ox, oy, dot_type))
 
-    t0 = time.perf_counter()
-    img_path = os.path.join(folder_path, image_files[frame_idx])
-    orig_np = np.array(Image.open(img_path).convert("RGB"))
-    predictor = get_image_predictor(model_id)
+    try:
+        import torch
+        t0 = time.perf_counter()
+        img_path = os.path.join(folder_path, image_files[frame_idx])
+        orig_np = np.array(Image.open(img_path).convert("RGB"))
+        predictor = get_image_predictor(model_id)
 
-    frame_masks = {}
-    score_parts = []
-    predictor.set_image(orig_np)
-    for label, pts in by_label.items():
-        coords_arr = np.array([[p[0], p[1]] for p in pts], dtype=np.float32)
-        labels_arr = np.array([p[2] for p in pts], dtype=np.int32)
-        masks, scores, _ = predictor.predict(
-            point_coords=coords_arr,
-            point_labels=labels_arr,
-            multimask_output=False,
+        autocast_ctx = (
+            torch.autocast("cuda", dtype=torch.bfloat16)
+            if predictor.device.type == "cuda"
+            else nullcontext()
         )
-        mask_bool = masks[0].astype(bool)
-        frame_masks[label] = mask_bool
-        score_parts.append(f"{label}: {int(mask_bool.sum())} px (score {float(scores[0]):.3f})")
+        frame_masks = {}
+        score_parts = []
+        with autocast_ctx:
+            predictor.set_image(orig_np)
+            for label, pts in by_label.items():
+                coords_arr = np.array([[p[0], p[1]] for p in pts], dtype=np.float32)
+                labels_arr = np.array([p[2] for p in pts], dtype=np.int32)
+                masks, scores, _ = predictor.predict(
+                    point_coords=coords_arr,
+                    point_labels=labels_arr,
+                    multimask_output=False,
+                )
+                mask_bool = masks[0].astype(bool)
+                frame_masks[label] = mask_bool
+                score_parts.append(f"{label}: {int(mask_bool.sum())} px (score {float(scores[0]):.3f})")
 
-    elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    preview_masks = dict(preview_masks or {})
-    preview_masks[frame_idx] = frame_masks
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        preview_masks = dict(preview_masks or {})
+        preview_masks[frame_idx] = frame_masks
 
-    display_img, _, _, _, _ = render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks)
-    status = f"Previewed frame {frame_idx + 1} in {elapsed_ms:.0f} ms | " + " | ".join(score_parts)
-    return display_img, preview_masks, status
+        display_img, _, _, _, _ = render_frame(
+            folder_path, image_files, frame_idx, dots_by_frame, preview_masks, label_order=label_order
+        )
+        status = f"Previewed frame {frame_idx + 1} in {elapsed_ms:.0f} ms | " + " | ".join(score_parts)
+        return display_img, preview_masks, status
+    except ImportError as e:
+        display_img, _, _, _, _ = render_frame(
+            folder_path, image_files, frame_idx, dots_by_frame, preview_masks, label_order=label_order
+        )
+        return (
+            display_img,
+            preview_masks,
+            f"Preview requires PyTorch and SAM 2 (run inside Docker or install torch + sam2): {e}",
+        )
+    except Exception as e:
+        display_img, _, _, _, _ = render_frame(
+            folder_path, image_files, frame_idx, dots_by_frame, preview_masks, label_order=label_order
+        )
+        return display_img, preview_masks, f"Preview failed: {e}"
 
 
-def clear_preview_masks(folder_path, image_files, frame_idx, dots_by_frame, preview_masks):
+def clear_preview_masks(folder_path, image_files, frame_idx, dots_by_frame, preview_masks, labels_text=""):
     if not image_files:
         return None, {}, "No folder loaded."
     frame_idx = int(frame_idx)
     preview_masks = dict(preview_masks or {})
     preview_masks.pop(frame_idx, None)
-    display_img, _, _, _, _ = render_frame(folder_path, image_files, frame_idx, dots_by_frame, preview_masks)
+    display_img, _, _, _, _ = render_frame(
+        folder_path, image_files, frame_idx, dots_by_frame, preview_masks, label_order=_parse_labels(labels_text)
+    )
     return display_img, preview_masks, f"Cleared mask preview on frame {frame_idx + 1}."
 
 
@@ -484,45 +538,45 @@ def build_app(config_path=None, initial_frames_dir=""):
         ]
         load_btn.click(
             load_folder,
-            inputs=[folder_input, labels_input],
+            inputs=[folder_input, labels_input, output_path_input],
             outputs=load_outputs,
         )
 
         if default_frames_dir:
             app.load(
                 load_folder,
-                inputs=[folder_input, labels_input],
+                inputs=[folder_input, labels_input, output_path_input],
                 outputs=load_outputs,
             )
 
         frame_slider.change(
             change_frame,
-            inputs=[frame_slider, folder_path_state, image_files_state, dots_by_frame_state, preview_masks_state],
+            inputs=[frame_slider, folder_path_state, image_files_state, dots_by_frame_state, preview_masks_state, labels_input],
             outputs=[image_display, status_label]
         )
 
         image_display.select(
             on_image_click,
             inputs=[folder_path_state, image_files_state, frame_slider, dots_by_frame_state,
-                    coordinates_state, label_dropdown, click_mode, preview_masks_state],
+                    coordinates_state, label_dropdown, click_mode, preview_masks_state, labels_input],
             outputs=[image_display, dots_by_frame_state, coordinates_state, status_label]
         )
 
         undo_btn.click(
             undo_last,
-            inputs=[folder_path_state, image_files_state, frame_slider, dots_by_frame_state, coordinates_state, preview_masks_state],
-            outputs=[image_display, dots_by_frame_state, coordinates_state, status_label]
+            inputs=[folder_path_state, image_files_state, frame_slider, dots_by_frame_state, coordinates_state, preview_masks_state, labels_input],
+            outputs=[image_display, dots_by_frame_state, coordinates_state, preview_masks_state, status_label]
         )
 
         preview_btn.click(
             preview_frame_masks,
-            inputs=[folder_path_state, image_files_state, frame_slider, dots_by_frame_state, preview_masks_state, model_dropdown],
+            inputs=[folder_path_state, image_files_state, frame_slider, dots_by_frame_state, preview_masks_state, model_dropdown, labels_input],
             outputs=[image_display, preview_masks_state, status_label]
         )
 
         clear_preview_btn.click(
             clear_preview_masks,
-            inputs=[folder_path_state, image_files_state, frame_slider, dots_by_frame_state, preview_masks_state],
+            inputs=[folder_path_state, image_files_state, frame_slider, dots_by_frame_state, preview_masks_state, labels_input],
             outputs=[image_display, preview_masks_state, status_label]
         )
 
