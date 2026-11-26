@@ -62,16 +62,21 @@ def map_gaze_data(base_dir, frames_dir, gaze_path, masks_dir, start_frame, end_f
     expanded_writer = csv.writer(expanded_csv_file)
     expanded_writer.writerow(["framenum", "code"])
 
-    pbar = tqdm(total=end_frame-start_frame, desc="Processing frames", unit="frame")
-
     masks_dict = {}
     mask_files = os.listdir(masks_dir)
     mask_files.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
     for i, file in enumerate(mask_files):
         masks_dict[i] = os.path.join(masks_dir, file)
 
+    if end_frame is None or str(end_frame).strip() == "":
+        num_frames = min(len(frame_names), len(mask_files))
+    else:
+        num_frames = max(0, int(end_frame) - int(start_frame))
+
+    pbar = tqdm(total=num_frames, desc="Processing frames", unit="frame")
+
     # Main loop that goes through every frame
-    for i in range(end_frame - start_frame):
+    for i in range(num_frames):
         pbar.update(1)
 
         frame_num = i + start_frame
@@ -115,9 +120,9 @@ def map_gaze_data(base_dir, frames_dir, gaze_path, masks_dir, start_frame, end_f
         out_video.write(frame)
 
     # Write the last fixation
-    start_fixation_frame = int(frame_num - fixation_duration)
-    end_fixation_frame = int(frame_num)
-    if fixation_duration != 0:
+    if num_frames > 0 and fixation_duration != 0:
+        start_fixation_frame = int(frame_num - fixation_duration)
+        end_fixation_frame = int(frame_num)
         writer.writerow([prev_fixation, int(fixation_duration), start_fixation_frame, end_fixation_frame,
                         round(fixation_duration / fps, 2), round(start_fixation_frame / fps, 2), round(end_fixation_frame / fps, 2)])
 
@@ -186,8 +191,8 @@ if __name__ == "__main__":
     frames_dir = p(cfg["frames_dir"])
     gaze_path = p(cfg["gaze_path"])
     masks_dir = p(cfg["masks_dir"])
-    start_frame = cfg["start_frame"]
-    end_frame = cfg["end_frame"]
+    start_frame = int(cfg.get("start_frame") or 0)
+    end_frame = cfg.get("end_frame")
     id = cfg["participant_id"]
     fps = cfg["fps"]
     uncertainty_radius = cfg.get("uncertainty_radius", 0)

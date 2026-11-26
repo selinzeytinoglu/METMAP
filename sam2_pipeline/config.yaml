@@ -2,7 +2,7 @@
 participant_id: sample
 fps: 30.0
 start_frame: 0
-end_frame: 300
+end_frame: null  # Leave null to extract/process the full video, or set an end frame index
 video_file: world.mp4
 
 # Base data directories

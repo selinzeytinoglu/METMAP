@@ -12,12 +12,18 @@ def main():
     data_dir = cfg["docker_data_dir"] if os.path.isdir(cfg["docker_data_dir"]) else cfg["local_data_dir"]
     video_path  = os.path.join(data_dir, cfg["video_file"])
     frames_dir  = os.path.join(data_dir, cfg["frames_dir"])
-    start_frame = cfg["start_frame"]
-    end_frame   = cfg["end_frame"]
+    start_frame = int(cfg.get("start_frame") or 0)
+    end_frame   = cfg.get("end_frame")
 
     os.makedirs(frames_dir, exist_ok=True)
 
-    select_filter = f"select='between(n,{start_frame},{end_frame})',setpts=PTS-STARTPTS"
+    if end_frame is None or str(end_frame).strip() == "":
+        select_filter = f"select='gte(n,{start_frame})',setpts=PTS-STARTPTS"
+        range_label = f"{start_frame}-end"
+    else:
+        end_frame = int(end_frame)
+        select_filter = f"select='between(n,{start_frame},{end_frame})',setpts=PTS-STARTPTS"
+        range_label = f"{start_frame}-{end_frame}"
 
     subprocess.run([
         "ffmpeg", "-i", video_path,
@@ -28,7 +34,7 @@ def main():
         os.path.join(frames_dir, "%05d.jpg")
     ], check=True)
 
-    print(f"Extracted frames {start_frame}–{end_frame} to {frames_dir}")
+    print(f"Extracted frames {range_label} to {frames_dir}")
 
 
 if __name__ == "__main__":
